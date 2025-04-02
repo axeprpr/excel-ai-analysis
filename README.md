@@ -253,6 +253,151 @@ Example response:
 }
 ```
 
+## Import And Table-Building Strategy
+
+Excel import is not just file parsing. The service should convert workbook content into a queryable relational structure that AI can reliably use.
+
+### Import principles
+
+- Process files sheet by sheet
+- Process large sheets in chunks instead of loading everything into memory
+- Preserve the raw source file in the session directory
+- Build stable table names and column names
+- Keep enough metadata so AI can understand what each table represents
+
+### Table creation strategy
+
+For each uploaded Excel file:
+
+1. Read workbook metadata and enumerate sheets.
+2. Detect the effective header row for each sheet.
+3. Normalize sheet names into SQLite-safe table names.
+4. Normalize column names into SQL-safe field names.
+5. Infer basic field types from sampled and streamed row values.
+6. Ask AI to enrich semantic meaning of columns when needed.
+7. Create SQLite tables in the session database.
+8. Insert sheet rows in batches.
+9. Persist table schema metadata for later text-to-SQL generation.
+
+Suggested table naming:
+
+- Use file name + sheet name as the base
+- Normalize to lowercase snake_case
+- Add suffixes only when conflicts happen
+
+Example:
+
+- `sales.xlsx` + `Q1 Report` -> `sales_q1_report`
+- `finance.xlsx` + `Sheet1` -> `finance_sheet1`
+
+Suggested column normalization:
+
+- Convert header text to lowercase snake_case
+- Remove spaces and special characters
+- Deduplicate repeated names
+- Replace empty headers with generated names such as `column_1`, `column_2`
+
+### Field type inference
+
+The first version should use practical type inference instead of trying to be perfect.
+
+Suggested SQLite-oriented types:
+
+- `TEXT`
+- `INTEGER`
+- `REAL`
+- `DATE`
+- `DATETIME`
+
+Suggested inference signals:
+
+- Header text
+- Sampled cell values
+- Value consistency across chunks
+- AI semantic hints for ambiguous business columns
+
+Examples:
+
+- `订单日期` -> likely `DATE`
+- `销售额` -> likely `REAL`
+- `数量` -> likely `INTEGER`
+- `客户名称` -> likely `TEXT`
+
+### Metadata generated per table
+
+Each imported table should produce metadata that is easier for AI to consume than raw SQLite introspection alone.
+
+Suggested metadata fields:
+
+- `table_name`
+- `source_file`
+- `source_sheet`
+- `row_count`
+- `columns`
+- `primary_semantics`
+- `time_columns`
+- `metric_columns`
+- `dimension_columns`
+- `sample_values`
+
+Example metadata fragment:
+
+```json
+{
+  "table_name": "sales_q1_report",
+  "source_file": "sales.xlsx",
+  "source_sheet": "Q1 Report",
+  "row_count": 102348,
+  "columns": [
+    { "name": "order_date", "type": "DATE", "semantic": "time" },
+    { "name": "product_name", "type": "TEXT", "semantic": "dimension" },
+    { "name": "revenue", "type": "REAL", "semantic": "metric" }
+  ]
+}
+```
+
+## Text-To-SQL Context
+
+Text-to-SQL should not rely only on the database schema. It should also use the metadata produced during import.
+
+The AI query layer should have access to:
+
+- Session table list
+- Column names and SQLite types
+- Source file and sheet names
+- Semantic labels such as metric, dimension, and time
+- Row counts and sample values
+- Query constraints such as row limits and forbidden full-table scans when possible
+
+This helps the model answer questions like:
+
+- "这个季度销售额最高的前十个产品是什么"
+- "按月份看客户增长趋势"
+- "华东区利润率最低的城市有哪些"
+
+### Text-to-SQL execution rules
+
+The first version should enforce a narrow execution policy:
+
+- Generate read-only SQL only
+- Prefer `SELECT` queries
+- Reject destructive SQL such as `DROP`, `DELETE`, and `UPDATE`
+- Apply result row limits by default
+- Return generated SQL together with rows for auditability
+
+### Recommended answer payload
+
+The query API should return both data and structured explanation for downstream rendering.
+
+Suggested response fields:
+
+- `sql`
+- `rows`
+- `columns`
+- `summary`
+- `visualization`
+- `warnings`
+
 ## Visualization
 
 The query result should support direct data presentation.
@@ -263,7 +408,104 @@ Initial direction:
 - Support common chart types such as table, bar, line, pie, and scatter.
 - Keep the chart layer replaceable so it can connect to a local chart solution later.
 
+Suggested chart selection rules:
+
+- Use `table` for detail records
+- Use `bar` for ranking and category comparison
+- Use `line` for time trends
+- Use `pie` only for low-cardinality composition
+- Use `scatter` for correlation-style analysis
+
 There is an MCP option available from chart providers, but it must run locally. For now, this repository will only define the output contract needed for local chart rendering.
+
+## Minimal Architecture
+
+The first version should stay simple and keep all responsibilities inside one container, but still separate concerns internally.
+
+Suggested modules:
+
+- `api`: HTTP endpoints for session, upload, import status, query, and delete
+- `session`: session creation, metadata persistence, retention, and cleanup
+- `storage`: local file storage and session directory management
+- `importer`: Excel parsing, chunked row reading, and table loading
+- `schema`: header detection, column normalization, type inference, and metadata generation
+- `ai`: schema enrichment and text-to-SQL prompt orchestration
+- `query`: SQL validation, execution, result shaping, and chart suggestion
+- `worker`: background job execution for import and cleanup
+
+Suggested request flow:
+
+1. API receives a request.
+2. Session layer resolves the session workspace.
+3. Storage layer reads or writes local files.
+4. Importer or query layer handles the business logic.
+5. AI layer is called only where semantic inference is needed.
+6. Query result is returned as rows plus visualization metadata.
+
+## Async Task Model
+
+Excel import should be asynchronous by default because files can be large and imports may involve AI-assisted schema work.
+
+Suggested task types:
+
+- `import`
+- `cleanup`
+- `rebuild_schema`
+
+Suggested task states:
+
+- `pending`
+- `running`
+- `completed`
+- `failed`
+
+Minimum task metadata:
+
+- `task_id`
+- `session_id`
+- `type`
+- `status`
+- `created_at`
+- `started_at`
+- `finished_at`
+- `error`
+
+For the first version, tasks can be implemented with a simple in-process worker and persisted JSON metadata under the session directory.
+
+## Constraints And Guardrails
+
+The service should explicitly optimize for stability over maximum flexibility.
+
+Recommended guardrails:
+
+- Limit concurrent imports per session
+- Reject unsupported file formats early
+- Cap workbook and sheet parsing concurrency
+- Use batched inserts for SQLite writes
+- Add query timeout and row limit controls
+- Log generated SQL for debugging
+- Keep the AI prompt bounded to session-local schema only
+
+## V1 Delivery Scope
+
+The first deliverable does not need to solve every analytics problem. It only needs to make the core loop reliable:
+
+1. Create session
+2. Upload Excel files
+3. Import sheets into the session database
+4. Generate schema metadata
+5. Ask a natural-language question
+6. Generate and run read-only SQL
+7. Return rows and chart-ready metadata
+
+Out of scope for V1:
+
+- Cross-session joins
+- Multi-tenant auth system
+- Distributed workers
+- Heavy query optimization
+- Rich dashboard editor
+- Full MCP-driven chart runtime integration
 
 ## Non-Goals For The First Version
 
@@ -281,6 +523,8 @@ There is an MCP option available from chart providers, but it must run locally. 
 - Reliable Excel upload
 - Large-sheet import
 - AI-based schema inference
+- Stable table naming and schema metadata generation
+- In-process async import worker
 - Local SQLite persistence
 - Natural-language to SQL query
 - Chart-friendly response payload
