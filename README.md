@@ -34,9 +34,16 @@ The core unit of the service is a `session`.
 Each session represents one isolated analysis workspace:
 
 - A session owns its uploaded Excel files.
-- A session owns its imported tables in local `SQLite3`.
+- A session owns its own local `SQLite3` database file.
 - A session keeps its own schema context for AI text-to-SQL.
 - Queries, results, and chart metadata are generated within a session.
+
+In other words, each session should have its own local resources instead of sharing one global database:
+
+- A dedicated session directory, for example `./data/sessions/<session_id>/`
+- A dedicated SQLite database, for example `./data/sessions/<session_id>/session.db`
+- Session-specific uploaded source files
+- Session-specific import metadata and generated schema artifacts
 
 This means different users, tasks, or business topics can be separated by session instead of mixing all uploaded data into one global database context.
 
@@ -55,11 +62,37 @@ Typical usage:
 3. Service stores files locally and creates an import task.
 4. Import pipeline reads workbook sheets in chunks.
 5. AI analyzes headers, column semantics, and likely field types.
-6. Service creates tables in local `SQLite3` under the session context.
+6. Service writes data into that session's own local `SQLite3` database.
 7. Excel data is written into SQLite tables.
 8. User sends a natural-language question for that session.
 9. AI generates SQL based on the session schema.
 10. Service executes SQL, returns rows, and optionally returns chart-friendly data.
+
+## Session Storage Layout
+
+Suggested local structure:
+
+```text
+data/
+  sessions/
+    sess_123/
+      session.db
+      uploads/
+        sales.xlsx
+        customers.xlsx
+      imports/
+        import_123.json
+      schema/
+        tables.json
+```
+
+This design keeps each session self-contained and easier to manage for:
+
+- Isolation
+- Cleanup
+- Debugging
+- Re-import
+- Future session export or backup
 
 ## Planned API
 
@@ -72,7 +105,8 @@ Example response:
 ```json
 {
   "session_id": "sess_123",
-  "status": "active"
+  "status": "active",
+  "database_path": "./data/sessions/sess_123/session.db"
 }
 ```
 
@@ -162,6 +196,7 @@ There is an MCP option available from chart providers, but it must run locally. 
 ## First Version Focus
 
 - Session-based workspace management
+- One SQLite database per session
 - Reliable Excel upload
 - Large-sheet import
 - AI-based schema inference
