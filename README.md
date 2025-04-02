@@ -19,6 +19,7 @@ This repository is intended to run as a single independent container.
 
 The container will provide:
 
+- Session-based workspace isolation.
 - File upload API for multiple Excel files.
 - Background import pipeline for large Excel parsing.
 - AI-assisted schema generation and table creation.
@@ -26,23 +27,58 @@ The container will provide:
 - Text-to-SQL API for asking questions in natural language.
 - Data visualization output support based on common chart solutions.
 
+## Session Model
+
+The core unit of the service is a `session`.
+
+Each session represents one isolated analysis workspace:
+
+- A session owns its uploaded Excel files.
+- A session owns its imported tables in local `SQLite3`.
+- A session keeps its own schema context for AI text-to-SQL.
+- Queries, results, and chart metadata are generated within a session.
+
+This means different users, tasks, or business topics can be separated by session instead of mixing all uploaded data into one global database context.
+
+Typical usage:
+
+1. Create a session.
+2. Upload one or more Excel files into that session.
+3. Wait for the import task to finish.
+4. Ask questions against that session.
+5. Render tables or charts from that session's query results.
+
 ## High-Level Flow
 
-1. Client uploads one or more Excel files.
-2. Service stores files locally and creates an import task.
-3. Import pipeline reads workbook sheets in chunks.
-4. AI analyzes headers, column semantics, and likely field types.
-5. Service creates tables in local `SQLite3`.
-6. Excel data is written into SQLite tables.
-7. User sends a natural-language question.
-8. AI generates SQL based on the imported schema.
-9. Service executes SQL, returns rows, and optionally returns chart-friendly data.
+1. Client creates a session.
+2. Client uploads one or more Excel files into the session.
+3. Service stores files locally and creates an import task.
+4. Import pipeline reads workbook sheets in chunks.
+5. AI analyzes headers, column semantics, and likely field types.
+6. Service creates tables in local `SQLite3` under the session context.
+7. Excel data is written into SQLite tables.
+8. User sends a natural-language question for that session.
+9. AI generates SQL based on the session schema.
+10. Service executes SQL, returns rows, and optionally returns chart-friendly data.
 
 ## Planned API
 
-### 1. Upload Excel files
+### 1. Create session
 
-`POST /api/files/upload`
+`POST /api/sessions`
+
+Example response:
+
+```json
+{
+  "session_id": "sess_123",
+  "status": "active"
+}
+```
+
+### 2. Upload Excel files
+
+`POST /api/sessions/:session_id/files/upload`
 
 Expected capability:
 
@@ -55,28 +91,30 @@ Example response:
 
 ```json
 {
+  "session_id": "sess_123",
   "task_id": "import_123",
   "status": "pending"
 }
 ```
 
-### 2. Check import status
+### 3. Check import status
 
-`GET /api/imports/:task_id`
+`GET /api/sessions/:session_id/imports/:task_id`
 
 Example response:
 
 ```json
 {
+  "session_id": "sess_123",
   "task_id": "import_123",
   "status": "completed",
   "tables": ["sales_2025", "customer_list"]
 }
 ```
 
-### 3. Ask questions in natural language
+### 4. Ask questions in natural language
 
-`POST /api/query`
+`POST /api/sessions/:session_id/query`
 
 Example request:
 
@@ -90,6 +128,7 @@ Example response:
 
 ```json
 {
+  "session_id": "sess_123",
   "sql": "SELECT product_name, SUM(revenue) AS total_revenue ...",
   "rows": [],
   "visualization": {
@@ -122,6 +161,7 @@ There is an MCP option available from chart providers, but it must run locally. 
 
 ## First Version Focus
 
+- Session-based workspace management
 - Reliable Excel upload
 - Large-sheet import
 - AI-based schema inference
