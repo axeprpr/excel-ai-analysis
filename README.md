@@ -442,6 +442,46 @@ Suggested request flow:
 5. AI layer is called only where semantic inference is needed.
 6. Query result is returned as rows plus visualization metadata.
 
+## Recommended Project Layout
+
+Suggested repository layout for the first implementation:
+
+```text
+.
+├── README.md
+├── cmd/
+│   └── server/
+│       └── main.*
+├── internal/
+│   ├── api/
+│   ├── session/
+│   ├── storage/
+│   ├── importer/
+│   ├── schema/
+│   ├── ai/
+│   ├── query/
+│   └── worker/
+├── data/
+│   └── sessions/
+├── configs/
+└── scripts/
+```
+
+Directory intent:
+
+- `cmd/server`: service entrypoint
+- `internal/api`: HTTP routes and request handlers
+- `internal/session`: session lifecycle and metadata management
+- `internal/storage`: local file paths, uploads, and session workspace helpers
+- `internal/importer`: Excel parsing and batch import logic
+- `internal/schema`: column normalization, type inference, and metadata output
+- `internal/ai`: prompts, model calls, and AI result shaping
+- `internal/query`: text-to-SQL generation, validation, execution, and formatting
+- `internal/worker`: async task runner and cleanup jobs
+- `data/sessions`: local runtime data, not source code
+- `configs`: runtime config templates
+- `scripts`: local development and maintenance scripts
+
 ## Async Task Model
 
 Excel import should be asynchronous by default because files can be large and imports may involve AI-assisted schema work.
