@@ -94,6 +94,45 @@ This design keeps each session self-contained and easier to manage for:
 - Re-import
 - Future session export or backup
 
+## Session Lifecycle
+
+A session should have an explicit lifecycle instead of staying forever.
+
+Suggested states:
+
+- `active`: session has been created and can accept uploads and queries
+- `importing`: one or more files are being parsed and written into the session database
+- `ready`: import is complete and the session is ready for question answering
+- `expired`: session has passed its retention window and is no longer queryable
+- `deleted`: session files and database have been removed
+
+Suggested lifecycle rules:
+
+1. A session is created with status `active`.
+2. When files are uploaded and import starts, status becomes `importing`.
+3. After import and schema generation finish, status becomes `ready`.
+4. If the session is idle for too long or passes its retention policy, status becomes `expired`.
+5. Expired sessions can be cleaned automatically or deleted explicitly by API.
+
+Suggested retention strategy for the first version:
+
+- Keep session data on local disk for a limited time
+- Update `last_accessed_at` on upload, import, and query
+- Run a background cleanup job to remove expired session directories
+- Make retention configurable, for example `24h`, `72h`, or `7d`
+
+Minimum session metadata:
+
+- `session_id`
+- `status`
+- `created_at`
+- `updated_at`
+- `last_accessed_at`
+- `expires_at`
+- `database_path`
+- `uploaded_files`
+- `tables`
+
 ## Planned API
 
 ### 1. Create session
@@ -106,11 +145,30 @@ Example response:
 {
   "session_id": "sess_123",
   "status": "active",
-  "database_path": "./data/sessions/sess_123/session.db"
+  "database_path": "./data/sessions/sess_123/session.db",
+  "expires_at": "2026-03-29T09:00:00Z"
 }
 ```
 
-### 2. Upload Excel files
+### 2. Get session
+
+`GET /api/sessions/:session_id`
+
+Example response:
+
+```json
+{
+  "session_id": "sess_123",
+  "status": "ready",
+  "created_at": "2026-03-26T09:00:00Z",
+  "last_accessed_at": "2026-03-26T10:30:00Z",
+  "expires_at": "2026-03-29T09:00:00Z",
+  "database_path": "./data/sessions/sess_123/session.db",
+  "tables": ["sales_2025", "customer_list"]
+}
+```
+
+### 3. Upload Excel files
 
 `POST /api/sessions/:session_id/files/upload`
 
@@ -127,11 +185,12 @@ Example response:
 {
   "session_id": "sess_123",
   "task_id": "import_123",
-  "status": "pending"
+  "status": "pending",
+  "session_status": "importing"
 }
 ```
 
-### 3. Check import status
+### 4. Check import status
 
 `GET /api/sessions/:session_id/imports/:task_id`
 
@@ -142,11 +201,12 @@ Example response:
   "session_id": "sess_123",
   "task_id": "import_123",
   "status": "completed",
+  "session_status": "ready",
   "tables": ["sales_2025", "customer_list"]
 }
 ```
 
-### 4. Ask questions in natural language
+### 5. Ask questions in natural language
 
 `POST /api/sessions/:session_id/query`
 
@@ -170,6 +230,26 @@ Example response:
     "x": "product_name",
     "y": "total_revenue"
   }
+}
+```
+
+### 6. Delete session
+
+`DELETE /api/sessions/:session_id`
+
+Expected behavior:
+
+- Remove session database
+- Remove uploaded files
+- Remove import metadata and schema artifacts
+- Mark session as deleted or return not found on future access
+
+Example response:
+
+```json
+{
+  "session_id": "sess_123",
+  "status": "deleted"
 }
 ```
 
@@ -197,6 +277,7 @@ There is an MCP option available from chart providers, but it must run locally. 
 
 - Session-based workspace management
 - One SQLite database per session
+- Session lifecycle and cleanup
 - Reliable Excel upload
 - Large-sheet import
 - AI-based schema inference
