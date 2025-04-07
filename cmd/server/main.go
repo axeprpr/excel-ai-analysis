@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/axeprpr/excel-ai-analysis/internal/api"
 )
 
 type healthResponse struct {
@@ -16,6 +18,11 @@ func main() {
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"
+	}
+
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "data"
 	}
 
 	mux := http.NewServeMux()
@@ -31,6 +38,7 @@ func main() {
 			Status:  "ok",
 		})
 	})
+	mux.Handle("/api/", api.NewHandler(dataDir))
 
 	log.Printf("server listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
