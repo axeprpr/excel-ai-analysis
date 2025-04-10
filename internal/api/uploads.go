@@ -91,6 +91,8 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go h.processImportTask(sessionID, task.TaskID)
+
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"session_id":     sessionID,
 		"task_id":        task.TaskID,
