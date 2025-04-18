@@ -76,6 +76,11 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		Tables:         []string{},
 	}
 
+	if err := initializeSessionWorkspace(sessionDir, meta.DatabasePath); err != nil {
+		http.Error(w, "failed to initialize session workspace", http.StatusInternalServerError)
+		return
+	}
+
 	if err := writeSessionMetadata(sessionDir, meta); err != nil {
 		http.Error(w, "failed to persist session metadata", http.StatusInternalServerError)
 		return
@@ -161,6 +166,25 @@ func writeSessionMetadata(sessionDir string, meta sessionMetadata) error {
 	}
 
 	return os.WriteFile(filepath.Join(sessionDir, "session.json"), data, 0o644)
+}
+
+func initializeSessionWorkspace(sessionDir, databasePath string) error {
+	for _, dir := range []string{
+		sessionDir,
+		filepath.Join(sessionDir, "uploads"),
+		filepath.Join(sessionDir, "imports"),
+		filepath.Join(sessionDir, "schema"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+
+	file, err := os.OpenFile(databasePath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	return file.Close()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

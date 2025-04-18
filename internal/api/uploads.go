@@ -15,14 +15,17 @@ import (
 )
 
 type importTask struct {
-	TaskID     string    `json:"task_id"`
-	SessionID  string    `json:"session_id"`
-	Type       string    `json:"type"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	FileCount  int       `json:"file_count"`
-	FileNames  []string  `json:"file_names"`
+	TaskID     string     `json:"task_id"`
+	SessionID  string     `json:"session_id"`
+	Type       string     `json:"type"`
+	Status     string     `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	Error      string     `json:"error,omitempty"`
+	FileCount  int        `json:"file_count"`
+	FileNames  []string   `json:"file_names"`
 }
 
 func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +103,7 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 		"session_status": meta.Status,
 		"file_count":     len(savedNames),
 		"file_names":     savedNames,
+		"created_at":     task.CreatedAt,
 	})
 }
 

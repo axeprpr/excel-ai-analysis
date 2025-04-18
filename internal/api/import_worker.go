@@ -22,14 +22,18 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 	if err != nil {
 		return
 	}
+	startedAt := time.Now().UTC()
 	task.Status = "running"
-	task.UpdatedAt = time.Now().UTC()
+	task.StartedAt = &startedAt
+	task.UpdatedAt = startedAt
+	task.Error = ""
 	if err := writeImportTaskFile(sessionDir, task); err != nil {
 		return
 	}
 
 	meta, err := readSessionMetadata(sessionDir)
 	if err != nil {
+		markTaskFailed(sessionDir, task, "failed to read session metadata")
 		return
 	}
 
@@ -47,9 +51,7 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 	}
 
 	if err := writeSchemaSnapshot(sessionDir, schemas); err != nil {
-		task.Status = "failed"
-		task.UpdatedAt = time.Now().UTC()
-		_ = writeImportTaskFile(sessionDir, task)
+		markTaskFailed(sessionDir, task, "failed to write schema snapshot")
 		return
 	}
 
@@ -59,14 +61,23 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 	meta.UpdatedAt = now
 	meta.LastAccessedAt = now
 	if err := writeSessionMetadata(sessionDir, meta); err != nil {
-		task.Status = "failed"
-		task.UpdatedAt = now
-		_ = writeImportTaskFile(sessionDir, task)
+		markTaskFailed(sessionDir, task, "failed to update session metadata")
 		return
 	}
 
 	task.Status = "completed"
+	task.FinishedAt = &now
 	task.UpdatedAt = now
+	task.Error = ""
+	_ = writeImportTaskFile(sessionDir, task)
+}
+
+func markTaskFailed(sessionDir string, task importTask, message string) {
+	now := time.Now().UTC()
+	task.Status = "failed"
+	task.FinishedAt = &now
+	task.UpdatedAt = now
+	task.Error = message
 	_ = writeImportTaskFile(sessionDir, task)
 }
 
