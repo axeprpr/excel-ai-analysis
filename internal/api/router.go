@@ -18,6 +18,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/sessions":
 		h.handleSessionsRoot(w, r)
 		return
+	case strings.HasSuffix(r.URL.Path, "/files") && strings.HasPrefix(r.URL.Path, "/api/sessions/"):
+		h.handleSessionFiles(w, r)
+		return
 	case strings.HasSuffix(r.URL.Path, "/imports") && strings.HasPrefix(r.URL.Path, "/api/sessions/"):
 		h.handleImports(w, r)
 		return
