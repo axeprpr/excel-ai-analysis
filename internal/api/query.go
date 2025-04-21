@@ -77,15 +77,15 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"question":   req.Question,
-		"sql":        buildPlaceholderSQL(meta.Tables),
-		"rows":       []map[string]any{},
-		"columns":    []string{},
+		"sql":        buildPlaceholderSQL(snapshot),
+		"rows":       buildPlaceholderRows(snapshot, req.Question),
+		"columns":    buildQueryColumns(snapshot),
 		"summary":    buildQuerySummary(req.Question, snapshot),
 		"visualization": map[string]any{
 			"type":   suggestVisualization(req.Question),
 			"title":  req.Question,
-			"x":      "dimension",
-			"y":      "value",
+			"x":      pickVisualizationX(snapshot),
+			"y":      pickVisualizationY(snapshot),
 			"tables": meta.Tables,
 		},
 		"warnings": []string{
@@ -109,18 +109,112 @@ func readSchemaSnapshot(sessionDir string) (schemaSnapshot, error) {
 	return snapshot, nil
 }
 
-func buildPlaceholderSQL(tables []string) string {
-	if len(tables) == 0 {
+func buildPlaceholderSQL(snapshot schemaSnapshot) string {
+	if len(snapshot.Tables) == 0 {
 		return "-- no imported tables available"
 	}
-	return "SELECT * FROM " + tables[0] + " LIMIT 100;"
+
+	table := snapshot.Tables[0]
+	if len(table.Columns) >= 2 {
+		return "SELECT " + table.Columns[0] + ", " + table.Columns[1] + " FROM " + table.TableName + " LIMIT 100;"
+	}
+	return "SELECT * FROM " + table.TableName + " LIMIT 100;"
 }
 
 func buildQuerySummary(question string, snapshot schemaSnapshot) string {
 	if len(snapshot.Tables) == 0 {
 		return "No imported tables are available for answering the question yet."
 	}
-	return "Received question: " + question + ". Query planning is currently based on session schema metadata only."
+	return "Received question: " + question + ". Query planning is currently based on session schema metadata from " + snapshot.Tables[0].TableName + "."
+}
+
+func buildQueryColumns(snapshot schemaSnapshot) []string {
+	if len(snapshot.Tables) == 0 {
+		return []string{}
+	}
+	return append([]string{}, snapshot.Tables[0].Columns...)
+}
+
+func buildPlaceholderRows(snapshot schemaSnapshot, question string) []map[string]any {
+	if len(snapshot.Tables) == 0 || len(snapshot.Tables[0].Columns) == 0 {
+		return []map[string]any{}
+	}
+
+	columns := snapshot.Tables[0].Columns
+	row := make(map[string]any, len(columns))
+	for i, column := range columns {
+		switch {
+		case isMetricColumn(column):
+			row[column] = 12345 + i
+		case isTimeColumn(column):
+			row[column] = "2025-04-01"
+		default:
+			row[column] = placeholderDimensionValue(column, question)
+		}
+	}
+	return []map[string]any{row}
+}
+
+func pickVisualizationX(snapshot schemaSnapshot) string {
+	if len(snapshot.Tables) == 0 || len(snapshot.Tables[0].Columns) == 0 {
+		return "dimension"
+	}
+
+	for _, column := range snapshot.Tables[0].Columns {
+		if !isMetricColumn(column) {
+			return column
+		}
+	}
+	return snapshot.Tables[0].Columns[0]
+}
+
+func pickVisualizationY(snapshot schemaSnapshot) string {
+	if len(snapshot.Tables) == 0 || len(snapshot.Tables[0].Columns) == 0 {
+		return "value"
+	}
+
+	for _, column := range snapshot.Tables[0].Columns {
+		if isMetricColumn(column) {
+			return column
+		}
+	}
+	return snapshot.Tables[0].Columns[0]
+}
+
+func isMetricColumn(column string) bool {
+	column = strings.ToLower(column)
+	return strings.Contains(column, "amount") ||
+		strings.Contains(column, "revenue") ||
+		strings.Contains(column, "price") ||
+		strings.Contains(column, "total") ||
+		strings.Contains(column, "count")
+}
+
+func isTimeColumn(column string) bool {
+	column = strings.ToLower(column)
+	return strings.Contains(column, "date") ||
+		strings.Contains(column, "time") ||
+		strings.Contains(column, "created_at") ||
+		strings.Contains(column, "month")
+}
+
+func placeholderDimensionValue(column, question string) string {
+	column = strings.ToLower(column)
+	switch {
+	case strings.Contains(column, "category"):
+		return "sample_category"
+	case strings.Contains(column, "region"):
+		return "east"
+	case strings.Contains(column, "customer"):
+		return "sample_customer"
+	case strings.Contains(column, "product"):
+		return "sample_product"
+	default:
+		if strings.TrimSpace(question) == "" {
+			return "sample_value"
+		}
+		return "sample_value"
+	}
 }
 
 func suggestVisualization(question string) string {

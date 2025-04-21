@@ -46,7 +46,7 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 			TableName:   tableName,
 			SourceFile:  fileName,
 			SourceSheet: "sheet1",
-			Columns:     []string{"column_1", "column_2", "column_3"},
+			Columns:     derivePlaceholderColumns(fileName),
 		})
 	}
 
@@ -136,4 +136,18 @@ func deriveTableName(fileName string) string {
 		return "table_1"
 	}
 	return name
+}
+
+func derivePlaceholderColumns(fileName string) []string {
+	tableName := deriveTableName(fileName)
+	switch {
+	case strings.Contains(tableName, "sale"), strings.Contains(tableName, "order"), strings.Contains(tableName, "revenue"):
+		return []string{"order_date", "category", "amount"}
+	case strings.Contains(tableName, "customer"), strings.Contains(tableName, "client"), strings.Contains(tableName, "user"):
+		return []string{"customer_name", "region", "created_at"}
+	case strings.Contains(tableName, "product"), strings.Contains(tableName, "item"):
+		return []string{"product_name", "category", "price"}
+	default:
+		return []string{"column_1", "column_2", "column_3"}
+	}
 }
