@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,6 +27,8 @@ type sessionMetadata struct {
 
 func (h *Handler) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
+	case http.MethodGet:
+		h.listSessions(w, r)
 	case http.MethodPost:
 		h.createSession(w, r)
 	default:
@@ -87,6 +90,46 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, meta)
+}
+
+func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
+	sessionsDir := filepath.Join(h.dataDir, "sessions")
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"sessions": []sessionMetadata{},
+			})
+			return
+		}
+		http.Error(w, "failed to list sessions", http.StatusInternalServerError)
+		return
+	}
+
+	sessions := make([]sessionMetadata, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		meta, err := readSessionMetadata(filepath.Join(sessionsDir, entry.Name()))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			http.Error(w, "failed to read session metadata", http.StatusInternalServerError)
+			return
+		}
+		sessions = append(sessions, meta)
+	}
+
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].CreatedAt.After(sessions[j].CreatedAt)
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sessions": sessions,
+	})
 }
 
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request, sessionID string) {
