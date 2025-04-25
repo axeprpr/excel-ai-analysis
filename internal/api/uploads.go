@@ -70,6 +70,11 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 
 	savedNames := make([]string, 0, len(files))
 	for _, fh := range files {
+		if !isSupportedUploadFile(fh.Filename) {
+			http.Error(w, "unsupported file type", http.StatusBadRequest)
+			return
+		}
+
 		savedName, err := saveUploadedFile(uploadDir, fh)
 		if err != nil {
 			http.Error(w, "failed to save uploaded file", http.StatusInternalServerError)
@@ -191,4 +196,13 @@ func newTaskID() (string, error) {
 		return "", err
 	}
 	return "import_" + strings.ToLower(hex.EncodeToString(buf[:])), nil
+}
+
+func isSupportedUploadFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".xlsx", ".xls", ".csv":
+		return true
+	default:
+		return false
+	}
 }
