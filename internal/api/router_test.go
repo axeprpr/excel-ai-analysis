@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestCreateAndListSessions(t *testing.T) {
@@ -99,5 +100,106 @@ func TestUploadRejectsUnsupportedFileType(t *testing.T) {
 
 	if uploadRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, uploadRec.Code)
+	}
+}
+
+func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("placeholder excel content")); err != nil {
+		t.Fatalf("failed to write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	var importRec *httptest.ResponseRecorder
+	for i := 0; i < 20; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var importResp map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &importResp); err != nil {
+			t.Fatalf("failed to decode import response: %v", err)
+		}
+
+		status, _ := importResp["status"].(string)
+		if status == "completed" {
+			importRec = rec
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if importRec == nil {
+		t.Fatalf("import task did not complete in time")
+	}
+
+	schemaReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/schema", nil)
+	schemaRec := httptest.NewRecorder()
+	handler.ServeHTTP(schemaRec, schemaReq)
+
+	if schemaRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, schemaRec.Code)
+	}
+
+	var schemaResp struct {
+		Tables []map[string]any `json:"tables"`
+	}
+	if err := json.Unmarshal(schemaRec.Body.Bytes(), &schemaResp); err != nil {
+		t.Fatalf("failed to decode schema response: %v", err)
+	}
+
+	if len(schemaResp.Tables) == 0 {
+		t.Fatalf("expected at least one table in schema response")
 	}
 }
