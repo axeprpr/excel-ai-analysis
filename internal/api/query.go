@@ -116,7 +116,7 @@ func buildPlaceholderSQL(snapshot schemaSnapshot) string {
 
 	table := snapshot.Tables[0]
 	if len(table.Columns) >= 2 {
-		return "SELECT " + table.Columns[0] + ", " + table.Columns[1] + " FROM " + table.TableName + " LIMIT 100;"
+		return "SELECT " + table.Columns[0].Name + ", " + table.Columns[1].Name + " FROM " + table.TableName + " LIMIT 100;"
 	}
 	return "SELECT * FROM " + table.TableName + " LIMIT 100;"
 }
@@ -132,7 +132,12 @@ func buildQueryColumns(snapshot schemaSnapshot) []string {
 	if len(snapshot.Tables) == 0 {
 		return []string{}
 	}
-	return append([]string{}, snapshot.Tables[0].Columns...)
+
+	columns := make([]string, 0, len(snapshot.Tables[0].Columns))
+	for _, column := range snapshot.Tables[0].Columns {
+		columns = append(columns, column.Name)
+	}
+	return columns
 }
 
 func buildPlaceholderRows(snapshot schemaSnapshot, question string) []map[string]any {
@@ -145,11 +150,11 @@ func buildPlaceholderRows(snapshot schemaSnapshot, question string) []map[string
 	for i, column := range columns {
 		switch {
 		case isMetricColumn(column):
-			row[column] = 12345 + i
+			row[column.Name] = 12345 + i
 		case isTimeColumn(column):
-			row[column] = "2025-04-01"
+			row[column.Name] = "2025-04-01"
 		default:
-			row[column] = placeholderDimensionValue(column, question)
+			row[column.Name] = placeholderDimensionValue(column.Name, question)
 		}
 	}
 	return []map[string]any{row}
@@ -162,10 +167,10 @@ func pickVisualizationX(snapshot schemaSnapshot) string {
 
 	for _, column := range snapshot.Tables[0].Columns {
 		if !isMetricColumn(column) {
-			return column
+			return column.Name
 		}
 	}
-	return snapshot.Tables[0].Columns[0]
+	return snapshot.Tables[0].Columns[0].Name
 }
 
 func pickVisualizationY(snapshot schemaSnapshot) string {
@@ -175,27 +180,35 @@ func pickVisualizationY(snapshot schemaSnapshot) string {
 
 	for _, column := range snapshot.Tables[0].Columns {
 		if isMetricColumn(column) {
-			return column
+			return column.Name
 		}
 	}
-	return snapshot.Tables[0].Columns[0]
+	return snapshot.Tables[0].Columns[0].Name
 }
 
-func isMetricColumn(column string) bool {
-	column = strings.ToLower(column)
-	return strings.Contains(column, "amount") ||
-		strings.Contains(column, "revenue") ||
-		strings.Contains(column, "price") ||
-		strings.Contains(column, "total") ||
-		strings.Contains(column, "count")
+func isMetricColumn(column schemaColumn) bool {
+	if column.Semantic == "metric" {
+		return true
+	}
+
+	name := strings.ToLower(column.Name)
+	return strings.Contains(name, "amount") ||
+		strings.Contains(name, "revenue") ||
+		strings.Contains(name, "price") ||
+		strings.Contains(name, "total") ||
+		strings.Contains(name, "count")
 }
 
-func isTimeColumn(column string) bool {
-	column = strings.ToLower(column)
-	return strings.Contains(column, "date") ||
-		strings.Contains(column, "time") ||
-		strings.Contains(column, "created_at") ||
-		strings.Contains(column, "month")
+func isTimeColumn(column schemaColumn) bool {
+	if column.Semantic == "time" {
+		return true
+	}
+
+	name := strings.ToLower(column.Name)
+	return strings.Contains(name, "date") ||
+		strings.Contains(name, "time") ||
+		strings.Contains(name, "created_at") ||
+		strings.Contains(name, "month")
 }
 
 func placeholderDimensionValue(column, question string) string {

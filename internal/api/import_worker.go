@@ -9,10 +9,16 @@ import (
 )
 
 type tableSchema struct {
-	TableName   string   `json:"table_name"`
-	SourceFile  string   `json:"source_file"`
-	SourceSheet string   `json:"source_sheet"`
-	Columns     []string `json:"columns"`
+	TableName   string         `json:"table_name"`
+	SourceFile  string         `json:"source_file"`
+	SourceSheet string         `json:"source_sheet"`
+	Columns     []schemaColumn `json:"columns"`
+}
+
+type schemaColumn struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Semantic string `json:"semantic"`
 }
 
 func (h *Handler) processImportTask(sessionID, taskID string) {
@@ -138,16 +144,32 @@ func deriveTableName(fileName string) string {
 	return name
 }
 
-func derivePlaceholderColumns(fileName string) []string {
+func derivePlaceholderColumns(fileName string) []schemaColumn {
 	tableName := deriveTableName(fileName)
 	switch {
 	case strings.Contains(tableName, "sale"), strings.Contains(tableName, "order"), strings.Contains(tableName, "revenue"):
-		return []string{"order_date", "category", "amount"}
+		return []schemaColumn{
+			{Name: "order_date", Type: "DATE", Semantic: "time"},
+			{Name: "category", Type: "TEXT", Semantic: "dimension"},
+			{Name: "amount", Type: "REAL", Semantic: "metric"},
+		}
 	case strings.Contains(tableName, "customer"), strings.Contains(tableName, "client"), strings.Contains(tableName, "user"):
-		return []string{"customer_name", "region", "created_at"}
+		return []schemaColumn{
+			{Name: "customer_name", Type: "TEXT", Semantic: "dimension"},
+			{Name: "region", Type: "TEXT", Semantic: "dimension"},
+			{Name: "created_at", Type: "DATETIME", Semantic: "time"},
+		}
 	case strings.Contains(tableName, "product"), strings.Contains(tableName, "item"):
-		return []string{"product_name", "category", "price"}
+		return []schemaColumn{
+			{Name: "product_name", Type: "TEXT", Semantic: "dimension"},
+			{Name: "category", Type: "TEXT", Semantic: "dimension"},
+			{Name: "price", Type: "REAL", Semantic: "metric"},
+		}
 	default:
-		return []string{"column_1", "column_2", "column_3"}
+		return []schemaColumn{
+			{Name: "column_1", Type: "TEXT", Semantic: "dimension"},
+			{Name: "column_2", Type: "TEXT", Semantic: "dimension"},
+			{Name: "column_3", Type: "REAL", Semantic: "metric"},
+		}
 	}
 }
