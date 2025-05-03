@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,6 +38,19 @@ func TestCreateAndListSessions(t *testing.T) {
 	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
 	if _, err := os.Stat(sessionDB); err != nil {
 		t.Fatalf("expected session db to exist: %v", err)
+	}
+
+	cmd := exec.Command(
+		"sqlite3",
+		sessionDB,
+		"SELECT name FROM sqlite_master WHERE type='table' AND name='session_meta';",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to inspect sqlite db: %v", err)
+	}
+	if string(bytes.TrimSpace(output)) != "session_meta" {
+		t.Fatalf("expected session_meta table to exist, got %q", string(bytes.TrimSpace(output)))
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -227,7 +228,25 @@ func initializeSessionWorkspace(sessionDir, databasePath string) error {
 	if err != nil {
 		return err
 	}
-	return file.Close()
+	if err := file.Close(); err != nil {
+		return err
+	}
+
+	return initializeSessionDatabase(databasePath)
+}
+
+func initializeSessionDatabase(databasePath string) error {
+	cmd := exec.Command(
+		"sqlite3",
+		databasePath,
+		`
+CREATE TABLE IF NOT EXISTS session_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`,
+	)
+	return cmd.Run()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
