@@ -70,6 +70,10 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 		markTaskFailed(sessionDir, task, "failed to update session metadata")
 		return
 	}
+	if err := syncSessionMetaToDatabase(meta); err != nil {
+		markTaskFailed(sessionDir, task, "failed to sync session metadata to database")
+		return
+	}
 
 	task.Status = "completed"
 	task.FinishedAt = &now

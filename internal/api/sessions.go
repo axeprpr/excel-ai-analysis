@@ -85,6 +85,11 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := syncSessionMetaToDatabase(meta); err != nil {
+		http.Error(w, "failed to initialize session metadata in database", http.StatusInternalServerError)
+		return
+	}
+
 	if err := writeSessionMetadata(sessionDir, meta); err != nil {
 		http.Error(w, "failed to persist session metadata", http.StatusInternalServerError)
 		return
@@ -247,6 +252,33 @@ CREATE TABLE IF NOT EXISTS session_meta (
 `,
 	)
 	return cmd.Run()
+}
+
+func syncSessionMetaToDatabase(meta sessionMetadata) error {
+	statements := []string{
+		sqliteUpsert("session_id", meta.SessionID),
+		sqliteUpsert("status", meta.Status),
+		sqliteUpsert("created_at", meta.CreatedAt.Format(time.RFC3339)),
+		sqliteUpsert("updated_at", meta.UpdatedAt.Format(time.RFC3339)),
+		sqliteUpsert("last_accessed_at", meta.LastAccessedAt.Format(time.RFC3339)),
+		sqliteUpsert("expires_at", meta.ExpiresAt.Format(time.RFC3339)),
+		sqliteUpsert("database_path", meta.DatabasePath),
+		sqliteUpsert("uploaded_files", strings.Join(meta.UploadedFiles, ",")),
+		sqliteUpsert("tables", strings.Join(meta.Tables, ",")),
+	}
+
+	cmd := exec.Command("sqlite3", meta.DatabasePath, strings.Join(statements, "\n"))
+	return cmd.Run()
+}
+
+func sqliteUpsert(key, value string) string {
+	return "INSERT INTO session_meta(key, value) VALUES(" +
+		sqliteQuote(key) + ", " + sqliteQuote(value) + ") " +
+		"ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+}
+
+func sqliteQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
