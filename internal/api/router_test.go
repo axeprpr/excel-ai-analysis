@@ -216,6 +216,31 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 	if len(schemaResp.Tables) == 0 {
 		t.Fatalf("expected at least one table in schema response")
 	}
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	statusOutput, err := exec.Command(
+		"sqlite3",
+		sessionDB,
+		"SELECT value FROM session_meta WHERE key='status';",
+	).Output()
+	if err != nil {
+		t.Fatalf("failed to read session status from sqlite: %v", err)
+	}
+	if string(bytes.TrimSpace(statusOutput)) != "ready" {
+		t.Fatalf("expected sqlite session status to be ready, got %q", string(bytes.TrimSpace(statusOutput)))
+	}
+
+	tablesOutput, err := exec.Command(
+		"sqlite3",
+		sessionDB,
+		"SELECT value FROM session_meta WHERE key='tables';",
+	).Output()
+	if err != nil {
+		t.Fatalf("failed to read session tables from sqlite: %v", err)
+	}
+	if string(bytes.TrimSpace(tablesOutput)) == "" {
+		t.Fatalf("expected sqlite session tables to be populated")
+	}
 }
 
 func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
