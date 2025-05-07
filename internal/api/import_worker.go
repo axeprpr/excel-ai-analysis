@@ -42,6 +42,10 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 		markTaskFailed(sessionDir, task, "failed to read session metadata")
 		return
 	}
+	if err := syncImportTaskToDatabase(meta.DatabasePath, task); err != nil {
+		markTaskFailed(sessionDir, task, "failed to sync import task to database")
+		return
+	}
 
 	tables := make([]string, 0, len(task.FileNames))
 	schemas := make([]tableSchema, 0, len(task.FileNames))
@@ -80,6 +84,7 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 	task.UpdatedAt = now
 	task.Error = ""
 	_ = writeImportTaskFile(sessionDir, task)
+	_ = syncImportTaskToDatabase(meta.DatabasePath, task)
 }
 
 func markTaskFailed(sessionDir string, task importTask, message string) {
@@ -89,6 +94,9 @@ func markTaskFailed(sessionDir string, task importTask, message string) {
 	task.UpdatedAt = now
 	task.Error = message
 	_ = writeImportTaskFile(sessionDir, task)
+	if meta, err := readSessionMetadata(sessionDir); err == nil {
+		_ = syncImportTaskToDatabase(meta.DatabasePath, task)
+	}
 }
 
 func writeImportTaskFile(sessionDir string, task importTask) error {

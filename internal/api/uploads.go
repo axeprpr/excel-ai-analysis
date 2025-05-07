@@ -9,7 +9,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -96,6 +98,10 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 	task, err := writeImportTask(sessionDir, sessionID, savedNames, now)
 	if err != nil {
 		http.Error(w, "failed to create import task", http.StatusInternalServerError)
+		return
+	}
+	if err := syncImportTaskToDatabase(meta.DatabasePath, task); err != nil {
+		http.Error(w, "failed to persist import task in database", http.StatusInternalServerError)
 		return
 	}
 
@@ -205,4 +211,46 @@ func isSupportedUploadFile(name string) bool {
 	default:
 		return false
 	}
+}
+
+func syncImportTaskToDatabase(databasePath string, task importTask) error {
+	startedAt := ""
+	if task.StartedAt != nil {
+		startedAt = task.StartedAt.Format(time.RFC3339)
+	}
+
+	finishedAt := ""
+	if task.FinishedAt != nil {
+		finishedAt = task.FinishedAt.Format(time.RFC3339)
+	}
+
+	statement := `
+INSERT INTO import_tasks(
+  task_id, session_id, type, status, created_at, started_at, finished_at, updated_at, error, file_count, file_names
+) VALUES(
+  ` + sqliteQuote(task.TaskID) + `,
+  ` + sqliteQuote(task.SessionID) + `,
+  ` + sqliteQuote(task.Type) + `,
+  ` + sqliteQuote(task.Status) + `,
+  ` + sqliteQuote(task.CreatedAt.Format(time.RFC3339)) + `,
+  ` + sqliteQuote(startedAt) + `,
+  ` + sqliteQuote(finishedAt) + `,
+  ` + sqliteQuote(task.UpdatedAt.Format(time.RFC3339)) + `,
+  ` + sqliteQuote(task.Error) + `,
+  ` + strconv.Itoa(task.FileCount) + `,
+  ` + sqliteQuote(strings.Join(task.FileNames, ",")) + `
+) ON CONFLICT(task_id) DO UPDATE SET
+  session_id=excluded.session_id,
+  type=excluded.type,
+  status=excluded.status,
+  created_at=excluded.created_at,
+  started_at=excluded.started_at,
+  finished_at=excluded.finished_at,
+  updated_at=excluded.updated_at,
+  error=excluded.error,
+  file_count=excluded.file_count,
+  file_names=excluded.file_names;
+`
+
+	return exec.Command("sqlite3", databasePath, statement).Run()
 }

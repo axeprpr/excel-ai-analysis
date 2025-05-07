@@ -249,6 +249,20 @@ CREATE TABLE IF NOT EXISTS session_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS import_tasks (
+  task_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  error TEXT,
+  file_count INTEGER NOT NULL,
+  file_names TEXT NOT NULL
+);
 `,
 	)
 	return cmd.Run()
