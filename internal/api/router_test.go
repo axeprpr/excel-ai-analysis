@@ -241,6 +241,30 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 	if string(bytes.TrimSpace(tablesOutput)) == "" {
 		t.Fatalf("expected sqlite session tables to be populated")
 	}
+
+	taskStatusOutput, err := exec.Command(
+		"sqlite3",
+		sessionDB,
+		"SELECT status FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";",
+	).Output()
+	if err != nil {
+		t.Fatalf("failed to read import task status from sqlite: %v", err)
+	}
+	if string(bytes.TrimSpace(taskStatusOutput)) != "completed" {
+		t.Fatalf("expected sqlite import task status to be completed, got %q", string(bytes.TrimSpace(taskStatusOutput)))
+	}
+
+	taskFilesOutput, err := exec.Command(
+		"sqlite3",
+		sessionDB,
+		"SELECT file_names FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";",
+	).Output()
+	if err != nil {
+		t.Fatalf("failed to read import task files from sqlite: %v", err)
+	}
+	if string(bytes.TrimSpace(taskFilesOutput)) == "" {
+		t.Fatalf("expected sqlite import task file names to be populated")
+	}
 }
 
 func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
