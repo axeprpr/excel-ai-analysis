@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -50,6 +52,12 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	sqliteTables, err := listSQLiteTables(meta.DatabasePath)
+	if err != nil {
+		http.Error(w, "failed to inspect sqlite tables", http.StatusInternalServerError)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id":    sessionID,
 		"status":        meta.Status,
@@ -57,5 +65,32 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 		"database_size": info.Size(),
 		"modified_at":   info.ModTime().UTC(),
 		"tables":        meta.Tables,
+		"sqlite_tables": sqliteTables,
 	})
+}
+
+func listSQLiteTables(databasePath string) ([]string, error) {
+	output, err := exec.Command(
+		"sqlite3",
+		databasePath,
+		"PRAGMA busy_timeout = 2000; SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;",
+	).Output()
+	if err != nil {
+		return nil, err
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(output), []byte("\n"))
+	if len(lines) == 1 && len(lines[0]) == 0 {
+		return []string{}, nil
+	}
+
+	tables := make([]string, 0, len(lines))
+	for _, line := range lines {
+		name := string(bytes.TrimSpace(line))
+		if name == "" {
+			continue
+		}
+		tables = append(tables, name)
+	}
+	return tables, nil
 }
