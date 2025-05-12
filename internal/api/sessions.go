@@ -263,6 +263,20 @@ CREATE TABLE IF NOT EXISTS import_tasks (
   file_count INTEGER NOT NULL,
   file_names TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS imported_tables (
+  table_name TEXT PRIMARY KEY,
+  source_file TEXT NOT NULL,
+  source_sheet TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS imported_columns (
+  table_name TEXT NOT NULL,
+  column_name TEXT NOT NULL,
+  column_type TEXT NOT NULL,
+  semantic TEXT NOT NULL,
+  PRIMARY KEY(table_name, column_name)
+);
 `,
 	)
 	return cmd.Run()
@@ -293,6 +307,10 @@ func sqliteUpsert(key, value string) string {
 
 func sqliteQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func execSQLite(databasePath, statement string) error {
+	return exec.Command("sqlite3", databasePath, statement).Run()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

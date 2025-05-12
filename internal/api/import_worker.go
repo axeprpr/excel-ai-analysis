@@ -64,6 +64,10 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 		markTaskFailed(sessionDir, task, "failed to write schema snapshot")
 		return
 	}
+	if err := syncSchemaToDatabase(meta.DatabasePath, schemas); err != nil {
+		markTaskFailed(sessionDir, task, "failed to sync schema to database")
+		return
+	}
 
 	now := time.Now().UTC()
 	meta.Status = "ready"
@@ -127,6 +131,34 @@ func writeSchemaSnapshot(sessionDir string, schemas []tableSchema) error {
 	}
 
 	return os.WriteFile(filepath.Join(schemaDir, "tables.json"), data, 0o644)
+}
+
+func syncSchemaToDatabase(databasePath string, schemas []tableSchema) error {
+	statements := []string{
+		"DELETE FROM imported_columns;",
+		"DELETE FROM imported_tables;",
+	}
+
+	for _, table := range schemas {
+		statements = append(statements,
+			"INSERT INTO imported_tables(table_name, source_file, source_sheet) VALUES("+
+				sqliteQuote(table.TableName)+", "+
+				sqliteQuote(table.SourceFile)+", "+
+				sqliteQuote(table.SourceSheet)+");",
+		)
+
+		for _, column := range table.Columns {
+			statements = append(statements,
+				"INSERT INTO imported_columns(table_name, column_name, column_type, semantic) VALUES("+
+					sqliteQuote(table.TableName)+", "+
+					sqliteQuote(column.Name)+", "+
+					sqliteQuote(column.Type)+", "+
+					sqliteQuote(column.Semantic)+");",
+			)
+		}
+	}
+
+	return execSQLite(databasePath, strings.Join(statements, "\n"))
 }
 
 func deriveTableName(fileName string) string {

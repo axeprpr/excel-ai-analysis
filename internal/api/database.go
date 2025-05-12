@@ -70,11 +70,19 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 }
 
 func listSQLiteTables(databasePath string) ([]string, error) {
-	output, err := exec.Command(
-		"sqlite3",
-		databasePath,
-		"PRAGMA busy_timeout = 2000; SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;",
-	).Output()
+	var output []byte
+	var err error
+	for i := 0; i < 3; i++ {
+		output, err = exec.Command(
+			"sqlite3",
+			databasePath,
+			"PRAGMA busy_timeout = 2000; SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;",
+		).Output()
+		if err == nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	if err != nil {
 		return nil, err
 	}

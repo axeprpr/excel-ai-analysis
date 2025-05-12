@@ -479,6 +479,8 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 
 	hasSessionMeta := false
 	hasImportTasks := false
+	hasImportedTables := false
+	hasImportedColumns := false
 	for _, table := range sqliteTables {
 		name, _ := table.(string)
 		if name == "session_meta" {
@@ -487,9 +489,15 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 		if name == "import_tasks" {
 			hasImportTasks = true
 		}
+		if name == "imported_tables" {
+			hasImportedTables = true
+		}
+		if name == "imported_columns" {
+			hasImportedColumns = true
+		}
 	}
 
-	if !hasSessionMeta || !hasImportTasks {
-		t.Fatalf("expected sqlite tables to include session_meta and import_tasks, got %v", sqliteTables)
+	if !hasSessionMeta || !hasImportTasks || !hasImportedTables || !hasImportedColumns {
+		t.Fatalf("expected sqlite tables to include session_meta, import_tasks, imported_tables, and imported_columns, got %v", sqliteTables)
 	}
 }
