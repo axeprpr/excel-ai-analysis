@@ -81,6 +81,7 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		"rows":       buildPlaceholderRows(snapshot, req.Question),
 		"columns":    buildQueryColumns(snapshot),
 		"summary":    buildQuerySummary(req.Question, snapshot),
+		"query_plan": buildQueryPlan(snapshot, req.Question),
 		"visualization": map[string]any{
 			"type":   suggestVisualization(req.Question),
 			"title":  req.Question,
@@ -158,6 +159,31 @@ func buildPlaceholderRows(snapshot schemaSnapshot, question string) []map[string
 		}
 	}
 	return []map[string]any{row}
+}
+
+func buildQueryPlan(snapshot schemaSnapshot, question string) map[string]any {
+	if len(snapshot.Tables) == 0 {
+		return map[string]any{
+			"source_table":     "",
+			"selected_columns": []string{},
+			"filters":          []string{},
+			"question":         question,
+		}
+	}
+
+	table := snapshot.Tables[0]
+	selectedColumns := buildQueryColumns(snapshot)
+	if len(selectedColumns) > 2 {
+		selectedColumns = selectedColumns[:2]
+	}
+
+	return map[string]any{
+		"source_table":     table.TableName,
+		"selected_columns": selectedColumns,
+		"filters":          []string{},
+		"question":         question,
+		"chart_type":       suggestVisualization(question),
+	}
 }
 
 func pickVisualizationX(snapshot schemaSnapshot) string {

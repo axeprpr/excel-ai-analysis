@@ -382,6 +382,21 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 	if visualization["type"] == "" {
 		t.Fatalf("expected visualization type in query response")
 	}
+
+	queryPlan, ok := queryResp["query_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_plan object in query response")
+	}
+
+	sourceTable, _ := queryPlan["source_table"].(string)
+	if sourceTable == "" {
+		t.Fatalf("expected source_table in query_plan")
+	}
+
+	selectedColumns, ok := queryPlan["selected_columns"].([]any)
+	if !ok || len(selectedColumns) == 0 {
+		t.Fatalf("expected selected_columns in query_plan")
+	}
 }
 
 func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
