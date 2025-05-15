@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -41,8 +42,7 @@ func TestCreateAndListSessions(t *testing.T) {
 	}
 
 	cmd := exec.Command(
-		"sqlite3",
-		sessionDB,
+		"sqlite3", "-cmd", ".timeout 2000", sessionDB,
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='session_meta';",
 	)
 	output, err := cmd.Output()
@@ -219,8 +219,7 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 
 	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
 	statusOutput, err := exec.Command(
-		"sqlite3",
-		sessionDB,
+		"sqlite3", "-cmd", ".timeout 2000", sessionDB,
 		"SELECT value FROM session_meta WHERE key='status';",
 	).Output()
 	if err != nil {
@@ -231,8 +230,7 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 	}
 
 	tablesOutput, err := exec.Command(
-		"sqlite3",
-		sessionDB,
+		"sqlite3", "-cmd", ".timeout 2000", sessionDB,
 		"SELECT value FROM session_meta WHERE key='tables';",
 	).Output()
 	if err != nil {
@@ -242,11 +240,7 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 		t.Fatalf("expected sqlite session tables to be populated")
 	}
 
-	taskStatusOutput, err := exec.Command(
-		"sqlite3",
-		sessionDB,
-		"SELECT status FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";",
-	).Output()
+	taskStatusOutput, err := sqliteQueryWithRetry(sessionDB, "SELECT status FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";")
 	if err != nil {
 		t.Fatalf("failed to read import task status from sqlite: %v", err)
 	}
@@ -254,11 +248,7 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 		t.Fatalf("expected sqlite import task status to be completed, got %q", string(bytes.TrimSpace(taskStatusOutput)))
 	}
 
-	taskFilesOutput, err := exec.Command(
-		"sqlite3",
-		sessionDB,
-		"SELECT file_names FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";",
-	).Output()
+	taskFilesOutput, err := sqliteQueryWithRetry(sessionDB, "SELECT file_names FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";")
 	if err != nil {
 		t.Fatalf("failed to read import task files from sqlite: %v", err)
 	}
@@ -515,4 +505,116 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 	if !hasSessionMeta || !hasImportTasks || !hasImportedTables || !hasImportedColumns {
 		t.Fatalf("expected sqlite tables to include session_meta, import_tasks, imported_tables, and imported_columns, got %v", sqliteTables)
 	}
+}
+
+func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	csvData := "order_date,category,amount\n2025-01-01,A,10\n2025-01-02,B,20\n"
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(csvData)); err != nil {
+		t.Fatalf("failed to write csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	for i := 0; i < 20; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var importResp map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &importResp); err != nil {
+			t.Fatalf("failed to decode import response: %v", err)
+		}
+
+		if status, _ := importResp["status"].(string); status == "completed" {
+			break
+		}
+
+		if i == 19 {
+			t.Fatalf("csv import task did not complete in time")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to count imported csv rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "2" {
+		t.Fatalf("expected 2 imported csv rows, got %q", string(bytes.TrimSpace(rowCountOutput)))
+	}
+
+	amountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT SUM(amount) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to sum imported csv amounts: %v", err)
+	}
+	if string(bytes.TrimSpace(amountOutput)) != "30" {
+		t.Fatalf("expected imported csv amount sum to be 30, got %q", string(bytes.TrimSpace(amountOutput)))
+	}
+}
+
+func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		output, err := exec.Command(
+			"sqlite3",
+			"-cmd", ".timeout 2000",
+			databasePath,
+			sql,
+		).Output()
+		if err == nil {
+			return output, nil
+		}
+		lastErr = err
+		time.Sleep(25 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("sqlite query failed after retries: %w", lastErr)
 }

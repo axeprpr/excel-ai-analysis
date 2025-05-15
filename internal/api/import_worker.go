@@ -2,8 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
+	"os"
 	"strings"
 	"time"
 )
@@ -51,13 +51,27 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 	schemas := make([]tableSchema, 0, len(task.FileNames))
 	for _, fileName := range task.FileNames {
 		tableName := deriveTableName(fileName)
+		filePath := filepath.Join(sessionDir, "uploads", fileName)
+
+		var schema tableSchema
+		switch strings.ToLower(filepath.Ext(fileName)) {
+		case ".csv":
+			schema, err = importCSVIntoSQLite(meta.DatabasePath, filePath, tableName)
+			if err != nil {
+				markTaskFailed(sessionDir, task, "failed to import csv into sqlite")
+				return
+			}
+		default:
+			schema = tableSchema{
+				TableName:   tableName,
+				SourceFile:  fileName,
+				SourceSheet: "sheet1",
+				Columns:     derivePlaceholderColumns(fileName),
+			}
+		}
+
 		tables = append(tables, tableName)
-		schemas = append(schemas, tableSchema{
-			TableName:   tableName,
-			SourceFile:  fileName,
-			SourceSheet: "sheet1",
-			Columns:     derivePlaceholderColumns(fileName),
-		})
+		schemas = append(schemas, schema)
 	}
 
 	if err := writeSchemaSnapshot(sessionDir, schemas); err != nil {
