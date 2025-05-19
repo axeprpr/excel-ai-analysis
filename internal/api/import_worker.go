@@ -68,6 +68,10 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 				SourceSheet: "sheet1",
 				Columns:     derivePlaceholderColumns(fileName),
 			}
+			if err := createPlaceholderSQLiteTable(meta.DatabasePath, schema); err != nil {
+				markTaskFailed(sessionDir, task, "failed to create placeholder sqlite table")
+				return
+			}
 		}
 
 		tables = append(tables, tableName)
@@ -173,6 +177,11 @@ func syncSchemaToDatabase(databasePath string, schemas []tableSchema) error {
 	}
 
 	return execSQLite(databasePath, strings.Join(statements, "\n"))
+}
+
+func createPlaceholderSQLiteTable(databasePath string, schema tableSchema) error {
+	createSQL := buildCreateTableSQL(schema.TableName, schema.Columns)
+	return execSQLite(databasePath, createSQL)
 }
 
 func deriveTableName(fileName string) string {

@@ -616,6 +616,25 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	if string(bytes.TrimSpace(amountOutput)) != "30" {
 		t.Fatalf("expected imported csv amount sum to be 30, got %q", string(bytes.TrimSpace(amountOutput)))
 	}
+
+	queryBody := bytes.NewBufferString(`{"question":"Show me the imported sales rows"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode csv query response: %v", err)
+	}
+
+	rows, ok := queryResp["rows"].([]any)
+	if !ok || len(rows) != 2 {
+		t.Fatalf("expected 2 real csv rows in query response, got %v", queryResp["rows"])
+	}
 }
 
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {

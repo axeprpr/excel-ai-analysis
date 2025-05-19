@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -74,12 +76,20 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sql := buildPlaceholderSQL(snapshot)
+	rows, columns, executed := executeQueryIfPossible(meta.DatabasePath, sql)
+	if !executed || len(columns) == 0 || len(rows) == 0 {
+		rows = buildPlaceholderRows(snapshot, req.Question)
+		columns = buildQueryColumns(snapshot)
+		executed = false
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"question":   req.Question,
-		"sql":        buildPlaceholderSQL(snapshot),
-		"rows":       buildPlaceholderRows(snapshot, req.Question),
-		"columns":    buildQueryColumns(snapshot),
+		"sql":        sql,
+		"rows":       rows,
+		"columns":    columns,
 		"summary":    buildQuerySummary(req.Question, snapshot),
 		"query_plan": buildQueryPlan(snapshot, req.Question),
 		"visualization": map[string]any{
@@ -90,7 +100,7 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 			"tables": meta.Tables,
 		},
 		"warnings": []string{
-			"Query execution is currently a placeholder response.",
+			queryWarning(executed),
 			"AI text-to-SQL generation is not implemented yet.",
 		},
 	})
@@ -159,6 +169,45 @@ func buildPlaceholderRows(snapshot schemaSnapshot, question string) []map[string
 		}
 	}
 	return []map[string]any{row}
+}
+
+func executeQueryIfPossible(databasePath, sql string) ([]map[string]any, []string, bool) {
+	output, err := exec.Command(
+		"sqlite3",
+		"-cmd", ".timeout 2000",
+		"-header",
+		"-json",
+		databasePath,
+		sql,
+	).Output()
+	if err != nil {
+		return nil, nil, false
+	}
+
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 {
+		return []map[string]any{}, []string{}, true
+	}
+
+	var rows []map[string]any
+	if err := json.Unmarshal(trimmed, &rows); err != nil {
+		return nil, nil, false
+	}
+
+	columns := []string{}
+	if len(rows) > 0 {
+		for key := range rows[0] {
+			columns = append(columns, key)
+		}
+	}
+	return rows, columns, true
+}
+
+func queryWarning(executed bool) string {
+	if executed {
+		return "Query executed against the local SQLite session database."
+	}
+	return "Query execution fell back to placeholder response data."
 }
 
 func buildQueryPlan(snapshot schemaSnapshot, question string) map[string]any {
