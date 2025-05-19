@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"errors"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -10,6 +11,13 @@ import (
 	"strings"
 	"time"
 )
+
+type databaseCatalogTable struct {
+	TableName   string         `json:"table_name"`
+	SourceFile  string         `json:"source_file"`
+	SourceSheet string         `json:"source_sheet"`
+	Columns     []schemaColumn `json:"columns"`
+}
 
 func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -58,6 +66,12 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	catalog, err := readSchemaCatalogFromDatabase(meta.DatabasePath)
+	if err != nil {
+		http.Error(w, "failed to read schema catalog from sqlite", http.StatusInternalServerError)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id":    sessionID,
 		"status":        meta.Status,
@@ -66,6 +80,7 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 		"modified_at":   info.ModTime().UTC(),
 		"tables":        meta.Tables,
 		"sqlite_tables": sqliteTables,
+		"catalog":       catalog,
 	})
 }
 
@@ -101,4 +116,68 @@ func listSQLiteTables(databasePath string) ([]string, error) {
 		tables = append(tables, name)
 	}
 	return tables, nil
+}
+
+func readSchemaCatalogFromDatabase(databasePath string) ([]databaseCatalogTable, error) {
+	output, err := sqliteQuery(databasePath, `
+SELECT table_name, source_file, source_sheet
+FROM imported_tables
+ORDER BY table_name;
+`)
+	if err != nil {
+		return nil, err
+	}
+
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 {
+		return []databaseCatalogTable{}, nil
+	}
+
+	var catalog []databaseCatalogTable
+	if err := json.Unmarshal(trimmed, &catalog); err != nil {
+		return nil, err
+	}
+
+	for i := range catalog {
+		columnOutput, err := sqliteQuery(databasePath, `
+SELECT column_name AS name, column_type AS type, semantic
+FROM imported_columns
+WHERE table_name = `+sqliteQuote(catalog[i].TableName)+`
+ORDER BY column_name;
+`)
+		if err != nil {
+			return nil, err
+		}
+
+		columnTrimmed := bytes.TrimSpace(columnOutput)
+		if len(columnTrimmed) == 0 {
+			catalog[i].Columns = []schemaColumn{}
+			continue
+		}
+
+		if err := json.Unmarshal(columnTrimmed, &catalog[i].Columns); err != nil {
+			return nil, err
+		}
+	}
+
+	return catalog, nil
+}
+
+func sqliteQuery(databasePath, sql string) ([]byte, error) {
+	var output []byte
+	var err error
+	for i := 0; i < 3; i++ {
+		output, err = exec.Command(
+			"sqlite3",
+			"-cmd", ".timeout 2000",
+			"-json",
+			databasePath,
+			sql,
+		).Output()
+		if err == nil {
+			return output, nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return nil, err
 }
