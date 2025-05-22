@@ -1,4 +1,4 @@
-.PHONY: test build run docker-build up
+.PHONY: test build run docker-build up smoke
 
 test:
 	go test ./...
@@ -14,3 +14,6 @@ docker-build:
 
 up:
 	docker compose up --build
+
+smoke:
+	bash ./scripts/smoke.sh

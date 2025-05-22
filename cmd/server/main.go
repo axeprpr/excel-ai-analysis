@@ -26,6 +26,15 @@ func main() {
 		dataDir = "data"
 	}
 
+	server := newServer(addr, dataDir)
+
+	log.Printf("server listening on %s", addr)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func newServer(addr, dataDir string) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -63,18 +72,13 @@ func main() {
 	})
 	mux.Handle("/api/", api.NewHandler(dataDir))
 
-	server := &http.Server{
+	return &http.Server{
 		Addr:              addr,
 		Handler:           withRequestLimits(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
-	}
-
-	log.Printf("server listening on %s", addr)
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
 	}
 }
 
