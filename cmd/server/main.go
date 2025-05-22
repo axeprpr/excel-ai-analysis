@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/axeprpr/excel-ai-analysis/internal/api"
 )
@@ -40,8 +41,24 @@ func main() {
 	})
 	mux.Handle("/api/", api.NewHandler(dataDir))
 
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           withRequestLimits(mux),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
 	log.Printf("server listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func withRequestLimits(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 256<<20)
+		next.ServeHTTP(w, r)
+	})
 }
