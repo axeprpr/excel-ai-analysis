@@ -76,7 +76,7 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sql := buildPlaceholderSQL(snapshot)
+	sql := buildSQLForQuestion(snapshot, req.Question)
 	rows, columns, executed := executeQueryIfPossible(meta.DatabasePath, sql)
 	if !executed || len(columns) == 0 || len(rows) == 0 {
 		rows = buildPlaceholderRows(snapshot, req.Question)
@@ -91,7 +91,7 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		"rows":       rows,
 		"columns":    columns,
 		"summary":    buildQuerySummary(req.Question, snapshot),
-		"query_plan": buildQueryPlan(snapshot, req.Question),
+		"query_plan": buildQueryPlan(snapshot, req.Question, sql),
 		"visualization": map[string]any{
 			"type":   suggestVisualization(req.Question),
 			"title":  req.Question,
@@ -210,13 +210,14 @@ func queryWarning(executed bool) string {
 	return "Query execution fell back to placeholder response data."
 }
 
-func buildQueryPlan(snapshot schemaSnapshot, question string) map[string]any {
+func buildQueryPlan(snapshot schemaSnapshot, question, sql string) map[string]any {
 	if len(snapshot.Tables) == 0 {
 		return map[string]any{
 			"source_table":     "",
 			"selected_columns": []string{},
 			"filters":          []string{},
 			"question":         question,
+			"sql":              sql,
 		}
 	}
 
@@ -232,7 +233,82 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) map[string]any {
 		"filters":          []string{},
 		"question":         question,
 		"chart_type":       suggestVisualization(question),
+		"mode":             detectQueryMode(question, table),
+		"sql":              sql,
 	}
+}
+
+func buildSQLForQuestion(snapshot schemaSnapshot, question string) string {
+	if len(snapshot.Tables) == 0 {
+		return "-- no imported tables available"
+	}
+
+	table := snapshot.Tables[0]
+	dimension := firstDimensionColumn(table)
+	metric := firstMetricColumn(table)
+	mode := detectQueryMode(question, table)
+
+	switch mode {
+	case "topn":
+		if dimension != "" && metric != "" {
+			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +
+				" GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 10;"
+		}
+	case "aggregate":
+		if metric != "" {
+			return "SELECT SUM(" + metric + ") AS total_value FROM " + table.TableName + ";"
+		}
+	}
+
+	if dimension != "" && metric != "" {
+		return "SELECT " + dimension + ", " + metric + " FROM " + table.TableName + " LIMIT 100;"
+	}
+	return buildPlaceholderSQL(snapshot)
+}
+
+func detectQueryMode(question string, table tableSchema) string {
+	q := strings.ToLower(strings.TrimSpace(question))
+	switch {
+	case strings.Contains(q, "top"),
+		strings.Contains(q, "rank"),
+		strings.Contains(q, "highest"),
+		strings.Contains(q, "排名"),
+		strings.Contains(q, "最高"),
+		strings.Contains(q, "最多"):
+		return "topn"
+	case strings.Contains(q, "sum"),
+		strings.Contains(q, "total"),
+		strings.Contains(q, "amount"),
+		strings.Contains(q, "总"),
+		strings.Contains(q, "合计"):
+		if firstMetricColumn(table) != "" {
+			return "aggregate"
+		}
+	}
+	return "detail"
+}
+
+func firstMetricColumn(table tableSchema) string {
+	for _, column := range table.Columns {
+		if isMetricColumn(column) {
+			return column.Name
+		}
+	}
+	return ""
+}
+
+func firstDimensionColumn(table tableSchema) string {
+	for _, column := range table.Columns {
+		if !isMetricColumn(column) && !isTimeColumn(column) {
+			return column.Name
+		}
+	}
+	for _, column := range table.Columns {
+		if !isMetricColumn(column) {
+			return column.Name
+		}
+	}
+	return ""
 }
 
 func pickVisualizationX(snapshot schemaSnapshot) string {

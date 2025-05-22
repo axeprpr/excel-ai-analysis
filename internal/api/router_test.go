@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -634,6 +635,35 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	rows, ok := queryResp["rows"].([]any)
 	if !ok || len(rows) != 2 {
 		t.Fatalf("expected 2 real csv rows in query response, got %v", queryResp["rows"])
+	}
+
+	aggBody := bytes.NewBufferString(`{"question":"What is the total sales amount?"}`)
+	aggReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", aggBody)
+	aggReq.Header.Set("Content-Type", "application/json")
+	aggRec := httptest.NewRecorder()
+	handler.ServeHTTP(aggRec, aggReq)
+	if aggRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, aggRec.Code)
+	}
+
+	var aggResp map[string]any
+	if err := json.Unmarshal(aggRec.Body.Bytes(), &aggResp); err != nil {
+		t.Fatalf("failed to decode aggregate query response: %v", err)
+	}
+
+	sql, _ := aggResp["sql"].(string)
+	if !strings.Contains(strings.ToUpper(sql), "SUM(") {
+		t.Fatalf("expected aggregate query sql to contain SUM, got %q", sql)
+	}
+
+	aggRows, ok := aggResp["rows"].([]any)
+	if !ok || len(aggRows) != 1 {
+		t.Fatalf("expected one aggregate row, got %v", aggResp["rows"])
+	}
+
+	aggPlan, ok := aggResp["query_plan"].(map[string]any)
+	if !ok || aggPlan["mode"] != "aggregate" {
+		t.Fatalf("expected aggregate query plan mode, got %v", aggResp["query_plan"])
 	}
 }
 
