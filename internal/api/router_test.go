@@ -665,6 +665,35 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	if !ok || aggPlan["mode"] != "aggregate" {
 		t.Fatalf("expected aggregate query plan mode, got %v", aggResp["query_plan"])
 	}
+
+	topBody := bytes.NewBufferString(`{"question":"What are the top categories by sales?"}`)
+	topReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", topBody)
+	topReq.Header.Set("Content-Type", "application/json")
+	topRec := httptest.NewRecorder()
+	handler.ServeHTTP(topRec, topReq)
+	if topRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, topRec.Code)
+	}
+
+	var topResp map[string]any
+	if err := json.Unmarshal(topRec.Body.Bytes(), &topResp); err != nil {
+		t.Fatalf("failed to decode top query response: %v", err)
+	}
+
+	topSQL, _ := topResp["sql"].(string)
+	if !strings.Contains(strings.ToUpper(topSQL), "GROUP BY") {
+		t.Fatalf("expected top query sql to contain GROUP BY, got %q", topSQL)
+	}
+
+	topPlan, ok := topResp["query_plan"].(map[string]any)
+	if !ok || topPlan["mode"] != "topn" {
+		t.Fatalf("expected top query plan mode, got %v", topResp["query_plan"])
+	}
+
+	topColumns, ok := topResp["columns"].([]any)
+	if !ok || len(topColumns) != 2 {
+		t.Fatalf("expected 2 ordered columns for top query, got %v", topResp["columns"])
+	}
 }
 
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {

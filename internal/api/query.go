@@ -20,6 +20,16 @@ type schemaSnapshot struct {
 	Tables []tableSchema `json:"tables"`
 }
 
+type queryPlan struct {
+	SourceTable     string   `json:"source_table"`
+	SelectedColumns []string `json:"selected_columns"`
+	Filters         []string `json:"filters"`
+	Question        string   `json:"question"`
+	ChartType       string   `json:"chart_type"`
+	Mode            string   `json:"mode"`
+	SQL             string   `json:"sql"`
+}
+
 func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -76,8 +86,8 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sql := buildSQLForQuestion(snapshot, req.Question)
-	rows, columns, executed := executeQueryIfPossible(meta.DatabasePath, sql)
+	plan := buildQueryPlan(snapshot, req.Question)
+	rows, columns, executed := executeQueryIfPossible(meta.DatabasePath, plan.SQL, plan.SelectedColumns)
 	if !executed || len(columns) == 0 || len(rows) == 0 {
 		rows = buildPlaceholderRows(snapshot, req.Question)
 		columns = buildQueryColumns(snapshot)
@@ -87,11 +97,11 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"question":   req.Question,
-		"sql":        sql,
+		"sql":        plan.SQL,
 		"rows":       rows,
 		"columns":    columns,
 		"summary":    buildQuerySummary(req.Question, snapshot),
-		"query_plan": buildQueryPlan(snapshot, req.Question, sql),
+		"query_plan": plan,
 		"visualization": map[string]any{
 			"type":   suggestVisualization(req.Question),
 			"title":  req.Question,
@@ -171,7 +181,7 @@ func buildPlaceholderRows(snapshot schemaSnapshot, question string) []map[string
 	return []map[string]any{row}
 }
 
-func executeQueryIfPossible(databasePath, sql string) ([]map[string]any, []string, bool) {
+func executeQueryIfPossible(databasePath, sql string, orderedColumns []string) ([]map[string]any, []string, bool) {
 	output, err := exec.Command(
 		"sqlite3",
 		"-cmd", ".timeout 2000",
@@ -194,8 +204,8 @@ func executeQueryIfPossible(databasePath, sql string) ([]map[string]any, []strin
 		return nil, nil, false
 	}
 
-	columns := []string{}
-	if len(rows) > 0 {
+	columns := append([]string{}, orderedColumns...)
+	if len(columns) == 0 && len(rows) > 0 {
 		for key := range rows[0] {
 			columns = append(columns, key)
 		}
@@ -210,31 +220,30 @@ func queryWarning(executed bool) string {
 	return "Query execution fell back to placeholder response data."
 }
 
-func buildQueryPlan(snapshot schemaSnapshot, question, sql string) map[string]any {
+func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 	if len(snapshot.Tables) == 0 {
-		return map[string]any{
-			"source_table":     "",
-			"selected_columns": []string{},
-			"filters":          []string{},
-			"question":         question,
-			"sql":              sql,
+		return queryPlan{
+			SourceTable:     "",
+			SelectedColumns: []string{},
+			Filters:         []string{},
+			Question:        question,
+			SQL:             "-- no imported tables available",
 		}
 	}
 
 	table := snapshot.Tables[0]
-	selectedColumns := buildQueryColumns(snapshot)
-	if len(selectedColumns) > 2 {
-		selectedColumns = selectedColumns[:2]
-	}
+	mode := detectQueryMode(question, table)
+	selectedColumns := selectedColumnsForMode(table, mode)
+	sql := buildSQLForQuestion(snapshot, question)
 
-	return map[string]any{
-		"source_table":     table.TableName,
-		"selected_columns": selectedColumns,
-		"filters":          []string{},
-		"question":         question,
-		"chart_type":       suggestVisualization(question),
-		"mode":             detectQueryMode(question, table),
-		"sql":              sql,
+	return queryPlan{
+		SourceTable:     table.TableName,
+		SelectedColumns: selectedColumns,
+		Filters:         []string{},
+		Question:        question,
+		ChartType:       suggestVisualization(question),
+		Mode:            mode,
+		SQL:             sql,
 	}
 }
 
@@ -264,6 +273,35 @@ func buildSQLForQuestion(snapshot schemaSnapshot, question string) string {
 		return "SELECT " + dimension + ", " + metric + " FROM " + table.TableName + " LIMIT 100;"
 	}
 	return buildPlaceholderSQL(snapshot)
+}
+
+func selectedColumnsForMode(table tableSchema, mode string) []string {
+	dimension := firstDimensionColumn(table)
+	metric := firstMetricColumn(table)
+
+	switch mode {
+	case "topn":
+		if dimension != "" && metric != "" {
+			return []string{dimension, "total_value"}
+		}
+	case "aggregate":
+		if metric != "" {
+			return []string{"total_value"}
+		}
+	}
+
+	if dimension != "" && metric != "" {
+		return []string{dimension, metric}
+	}
+	return columnNames(table.Columns)
+}
+
+func columnNames(columns []schemaColumn) []string {
+	names := make([]string, 0, len(columns))
+	for _, column := range columns {
+		names = append(names, column.Name)
+	}
+	return names
 }
 
 func detectQueryMode(question string, table tableSchema) string {
