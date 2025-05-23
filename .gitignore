@@ -1,0 +1,9 @@
+data/
+tmp/
+bin/
+dist/
+*.db
+*.log
+*.out
+*.test
+coverage.txt
