@@ -519,6 +519,9 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 	if firstTable["table_name"] == "" {
 		t.Fatalf("expected catalog table_name to be populated")
 	}
+	if firstTable["row_count"] == nil {
+		t.Fatalf("expected catalog row_count to be populated")
+	}
 	columns, ok := firstTable["columns"].([]any)
 	if !ok || len(columns) == 0 {
 		t.Fatalf("expected catalog columns to be populated")
@@ -664,6 +667,10 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	aggPlan, ok := aggResp["query_plan"].(map[string]any)
 	if !ok || aggPlan["mode"] != "aggregate" {
 		t.Fatalf("expected aggregate query plan mode, got %v", aggResp["query_plan"])
+	}
+	aggSummary, _ := aggResp["summary"].(string)
+	if !strings.Contains(aggSummary, "aggregate mode") {
+		t.Fatalf("expected aggregate summary to mention aggregate mode, got %q", aggSummary)
 	}
 
 	topBody := bytes.NewBufferString(`{"question":"What are the top categories by sales?"}`)

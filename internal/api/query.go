@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -100,7 +102,7 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		"sql":        plan.SQL,
 		"rows":       rows,
 		"columns":    columns,
-		"summary":    buildQuerySummary(req.Question, snapshot),
+		"summary":    buildQuerySummary(plan, executed, len(rows)),
 		"query_plan": plan,
 		"visualization": map[string]any{
 			"type":   suggestVisualization(req.Question),
@@ -142,11 +144,15 @@ func buildPlaceholderSQL(snapshot schemaSnapshot) string {
 	return "SELECT * FROM " + table.TableName + " LIMIT 100;"
 }
 
-func buildQuerySummary(question string, snapshot schemaSnapshot) string {
-	if len(snapshot.Tables) == 0 {
+func buildQuerySummary(plan queryPlan, executed bool, rowCount int) string {
+	if plan.SourceTable == "" {
 		return "No imported tables are available for answering the question yet."
 	}
-	return "Received question: " + question + ". Query planning is currently based on session schema metadata from " + snapshot.Tables[0].TableName + "."
+	status := "used placeholder rows"
+	if executed {
+		status = "executed against SQLite"
+	}
+	return "Query on table " + plan.SourceTable + " ran in " + plan.Mode + " mode and " + status + ", returning " + strconv.Itoa(rowCount) + " row(s)."
 }
 
 func buildQueryColumns(snapshot schemaSnapshot) []string {
@@ -209,6 +215,7 @@ func executeQueryIfPossible(databasePath, sql string, orderedColumns []string) (
 		for key := range rows[0] {
 			columns = append(columns, key)
 		}
+		sort.Strings(columns)
 	}
 	return rows, columns, true
 }

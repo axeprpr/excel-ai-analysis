@@ -2,8 +2,9 @@ package api
 
 import (
 	"bytes"
-	"errors"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ type databaseCatalogTable struct {
 	TableName   string         `json:"table_name"`
 	SourceFile  string         `json:"source_file"`
 	SourceSheet string         `json:"source_sheet"`
+	RowCount    int            `json:"row_count"`
 	Columns     []schemaColumn `json:"columns"`
 }
 
@@ -139,6 +141,14 @@ ORDER BY table_name;
 	}
 
 	for i := range catalog {
+		rowCountOutput, err := sqliteQueryText(databasePath, `SELECT COUNT(*) FROM `+sqliteIdent(catalog[i].TableName)+`;`)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := fmt.Sscanf(strings.TrimSpace(string(rowCountOutput)), "%d", &catalog[i].RowCount); err != nil {
+			return nil, err
+		}
+
 		columnOutput, err := sqliteQuery(databasePath, `
 SELECT column_name AS name, column_type AS type, semantic
 FROM imported_columns
@@ -171,6 +181,24 @@ func sqliteQuery(databasePath, sql string) ([]byte, error) {
 			"sqlite3",
 			"-cmd", ".timeout 2000",
 			"-json",
+			databasePath,
+			sql,
+		).Output()
+		if err == nil {
+			return output, nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return nil, err
+}
+
+func sqliteQueryText(databasePath, sql string) ([]byte, error) {
+	var output []byte
+	var err error
+	for i := 0; i < 3; i++ {
+		output, err = exec.Command(
+			"sqlite3",
+			"-cmd", ".timeout 2000",
 			databasePath,
 			sql,
 		).Output()
