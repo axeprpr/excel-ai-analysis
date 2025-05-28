@@ -701,6 +701,35 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	if !ok || len(topColumns) != 2 {
 		t.Fatalf("expected 2 ordered columns for top query, got %v", topResp["columns"])
 	}
+
+	trendBody := bytes.NewBufferString(`{"question":"Show the sales trend by month"}`)
+	trendReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", trendBody)
+	trendReq.Header.Set("Content-Type", "application/json")
+	trendRec := httptest.NewRecorder()
+	handler.ServeHTTP(trendRec, trendReq)
+	if trendRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, trendRec.Code)
+	}
+
+	var trendResp map[string]any
+	if err := json.Unmarshal(trendRec.Body.Bytes(), &trendResp); err != nil {
+		t.Fatalf("failed to decode trend query response: %v", err)
+	}
+
+	trendSQL, _ := trendResp["sql"].(string)
+	if !strings.Contains(strings.ToLower(trendSQL), "time_bucket") {
+		t.Fatalf("expected trend query sql to include time_bucket, got %q", trendSQL)
+	}
+
+	trendPlan, ok := trendResp["query_plan"].(map[string]any)
+	if !ok || trendPlan["mode"] != "trend" {
+		t.Fatalf("expected trend query plan mode, got %v", trendResp["query_plan"])
+	}
+
+	trendColumns, ok := trendResp["columns"].([]any)
+	if !ok || len(trendColumns) != 2 {
+		t.Fatalf("expected 2 ordered columns for trend query, got %v", trendResp["columns"])
+	}
 }
 
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {

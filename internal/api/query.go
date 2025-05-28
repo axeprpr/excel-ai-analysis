@@ -265,6 +265,12 @@ func buildSQLForQuestion(snapshot schemaSnapshot, question string) string {
 	mode := detectQueryMode(question, table)
 
 	switch mode {
+	case "trend":
+		timeColumn := firstTimeColumn(table)
+		if timeColumn != "" && metric != "" {
+			return "SELECT substr(" + timeColumn + ", 1, 7) AS time_bucket, SUM(" + metric + ") AS total_value FROM " + table.TableName +
+				" GROUP BY time_bucket ORDER BY time_bucket ASC;"
+		}
 	case "topn":
 		if dimension != "" && metric != "" {
 			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +
@@ -287,6 +293,10 @@ func selectedColumnsForMode(table tableSchema, mode string) []string {
 	metric := firstMetricColumn(table)
 
 	switch mode {
+	case "trend":
+		if firstTimeColumn(table) != "" && metric != "" {
+			return []string{"time_bucket", "total_value"}
+		}
 	case "topn":
 		if dimension != "" && metric != "" {
 			return []string{dimension, "total_value"}
@@ -314,6 +324,15 @@ func columnNames(columns []schemaColumn) []string {
 func detectQueryMode(question string, table tableSchema) string {
 	q := strings.ToLower(strings.TrimSpace(question))
 	switch {
+	case strings.Contains(q, "trend"),
+		strings.Contains(q, "over time"),
+		strings.Contains(q, "by month"),
+		strings.Contains(q, "monthly"),
+		strings.Contains(q, "按月"),
+		strings.Contains(q, "趋势"):
+		if firstTimeColumn(table) != "" && firstMetricColumn(table) != "" {
+			return "trend"
+		}
 	case strings.Contains(q, "top"),
 		strings.Contains(q, "rank"),
 		strings.Contains(q, "highest"),
@@ -350,6 +369,15 @@ func firstDimensionColumn(table tableSchema) string {
 	}
 	for _, column := range table.Columns {
 		if !isMetricColumn(column) {
+			return column.Name
+		}
+	}
+	return ""
+}
+
+func firstTimeColumn(table tableSchema) string {
+	for _, column := range table.Columns {
+		if isTimeColumn(column) {
 			return column.Name
 		}
 	}
