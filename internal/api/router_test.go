@@ -488,6 +488,11 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 		t.Fatalf("expected catalog in database response")
 	}
 
+	importTasks, ok := dbResp["import_tasks"].([]any)
+	if !ok || len(importTasks) == 0 {
+		t.Fatalf("expected import_tasks in database response")
+	}
+
 	hasSessionMeta := false
 	hasImportTasks := false
 	hasImportedTables := false
@@ -525,6 +530,14 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 	columns, ok := firstTable["columns"].([]any)
 	if !ok || len(columns) == 0 {
 		t.Fatalf("expected catalog columns to be populated")
+	}
+
+	firstTask, ok := importTasks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first import task entry to be an object")
+	}
+	if firstTask["status"] == "" {
+		t.Fatalf("expected import task status to be populated")
 	}
 }
 

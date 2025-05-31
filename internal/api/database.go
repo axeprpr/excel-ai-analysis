@@ -21,6 +21,15 @@ type databaseCatalogTable struct {
 	Columns     []schemaColumn `json:"columns"`
 }
 
+type databaseImportTask struct {
+	TaskID     string `json:"task_id"`
+	Status     string `json:"status"`
+	Type       string `json:"type"`
+	FileCount  int    `json:"file_count"`
+	FileNames  string `json:"file_names"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
 func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -74,6 +83,12 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	importTasks, err := readImportTaskCatalogFromDatabase(meta.DatabasePath)
+	if err != nil {
+		http.Error(w, "failed to read import tasks from sqlite", http.StatusInternalServerError)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id":    sessionID,
 		"status":        meta.Status,
@@ -83,6 +98,7 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 		"tables":        meta.Tables,
 		"sqlite_tables": sqliteTables,
 		"catalog":       catalog,
+		"import_tasks":  importTasks,
 	})
 }
 
@@ -208,4 +224,26 @@ func sqliteQueryText(databasePath, sql string) ([]byte, error) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	return nil, err
+}
+
+func readImportTaskCatalogFromDatabase(databasePath string) ([]databaseImportTask, error) {
+	output, err := sqliteQuery(databasePath, `
+SELECT task_id, status, type, file_count, file_names, updated_at
+FROM import_tasks
+ORDER BY updated_at DESC;
+`)
+	if err != nil {
+		return nil, err
+	}
+
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 {
+		return []databaseImportTask{}, nil
+	}
+
+	var tasks []databaseImportTask
+	if err := json.Unmarshal(trimmed, &tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
 }
