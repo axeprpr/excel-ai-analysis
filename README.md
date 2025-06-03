@@ -13,6 +13,99 @@ Provide an API service for Excel question answering:
 - Support text-to-SQL querying for natural-language question answering.
 - Return query results in a format that can be rendered as charts or tables.
 
+## Current Status
+
+The repository already contains a runnable first implementation.
+
+What works now:
+
+- Session creation, listing, inspection, and deletion
+- Local session workspace creation with a dedicated `SQLite3` database
+- File upload for `.csv`, `.xlsx`, and `.xls`
+- Real CSV import into SQLite tables
+- Import task lifecycle tracking in both JSON files and SQLite
+- Schema catalog persistence in both JSON files and SQLite
+- Query API with basic modes:
+  - detail
+  - aggregate
+  - top-n
+  - trend by month
+- Database inspection API for SQLite tables, imported schema catalog, and import task diagnostics
+- Local container build and local compose startup files
+
+Current limitation:
+
+- `.csv` has real row import into SQLite
+- `.xlsx` and `.xls` currently use placeholder schema/table scaffolding and are not fully parsed yet
+
+## Quick Start
+
+### Run locally
+
+```bash
+make run
+```
+
+### Run tests
+
+```bash
+make test
+```
+
+### Smoke check
+
+```bash
+make smoke
+```
+
+### Run with Docker Compose
+
+```bash
+make up
+```
+
+## Current API Surface
+
+Implemented endpoints:
+
+- `GET /`
+- `GET /healthz`
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `GET /api/sessions/:session_id`
+- `DELETE /api/sessions/:session_id`
+- `GET /api/sessions/:session_id/files`
+- `POST /api/sessions/:session_id/files/upload`
+- `GET /api/sessions/:session_id/imports`
+- `GET /api/sessions/:session_id/imports/:task_id`
+- `GET /api/sessions/:session_id/schema`
+- `GET /api/sessions/:session_id/database`
+- `POST /api/sessions/:session_id/query`
+
+## Current Query Behavior
+
+The query layer is still heuristic, but it is no longer just static placeholder output.
+
+Current behavior:
+
+- If a real imported SQLite table is available, the service tries to execute SQL against the local session database.
+- If real execution is not possible, it falls back to placeholder response data.
+- Query responses include:
+  - `sql`
+  - `rows`
+  - `columns`
+  - `summary`
+  - `query_plan`
+  - `visualization`
+  - `warnings`
+
+Current query modes:
+
+- `detail`
+- `aggregate`
+- `topn`
+- `trend`
+
 ## Service Scope
 
 This repository is intended to run as a single independent container.
