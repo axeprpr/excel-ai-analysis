@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xuri/excelize/v2"
 )
 
 func TestCreateAndListSessions(t *testing.T) {
@@ -171,33 +173,7 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 		t.Fatalf("expected task_id in upload response")
 	}
 
-	var importRec *httptest.ResponseRecorder
-	for i := 0; i < 20; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
-		}
-
-		var importResp map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &importResp); err != nil {
-			t.Fatalf("failed to decode import response: %v", err)
-		}
-
-		status, _ := importResp["status"].(string)
-		if status == "completed" {
-			importRec = rec
-			break
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	if importRec == nil {
-		t.Fatalf("import task did not complete in time")
-	}
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
 
 	schemaReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/schema", nil)
 	schemaRec := httptest.NewRecorder()
@@ -311,29 +287,7 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 		t.Fatalf("expected task_id in upload response")
 	}
 
-	for i := 0; i < 20; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
-		}
-
-		var importResp map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &importResp); err != nil {
-			t.Fatalf("failed to decode import response: %v", err)
-		}
-
-		if status, _ := importResp["status"].(string); status == "completed" {
-			break
-		}
-
-		if i == 19 {
-			t.Fatalf("import task did not complete in time")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
 
 	queryBody := bytes.NewBufferString(`{"question":"What is the top sales category?"}`)
 	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
@@ -442,29 +396,7 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 		t.Fatalf("expected task_id in upload response")
 	}
 
-	for i := 0; i < 20; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
-		}
-
-		var importResp map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &importResp); err != nil {
-			t.Fatalf("failed to decode import response: %v", err)
-		}
-
-		if status, _ := importResp["status"].(string); status == "completed" {
-			break
-		}
-
-		if i == 19 {
-			t.Fatalf("import task did not complete in time")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
 
 	dbReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/database", nil)
 	dbRec := httptest.NewRecorder()
@@ -593,29 +525,7 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 		t.Fatalf("expected task_id in upload response")
 	}
 
-	for i := 0; i < 20; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
-		}
-
-		var importResp map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &importResp); err != nil {
-			t.Fatalf("failed to decode import response: %v", err)
-		}
-
-		if status, _ := importResp["status"].(string); status == "completed" {
-			break
-		}
-
-		if i == 19 {
-			t.Fatalf("csv import task did not complete in time")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
 
 	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
 	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
@@ -745,6 +655,85 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	}
 }
 
+func TestXLSXUploadImportsRowsIntoSQLite(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	workbook := excelize.NewFile()
+	workbook.SetCellValue("Sheet1", "A1", "order_date")
+	workbook.SetCellValue("Sheet1", "B1", "category")
+	workbook.SetCellValue("Sheet1", "C1", "amount")
+	workbook.SetCellValue("Sheet1", "A2", "2025-01-01")
+	workbook.SetCellValue("Sheet1", "B2", "A")
+	workbook.SetCellValue("Sheet1", "C2", 10)
+	workbook.SetCellValue("Sheet1", "A3", "2025-01-02")
+	workbook.SetCellValue("Sheet1", "B3", "B")
+	workbook.SetCellValue("Sheet1", "C3", 20)
+
+	var xlsx bytes.Buffer
+	if err := workbook.Write(&xlsx); err != nil {
+		t.Fatalf("failed to write xlsx workbook: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(xlsx.Bytes()); err != nil {
+		t.Fatalf("failed to write xlsx bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to count imported xlsx rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "2" {
+		t.Fatalf("expected 2 imported xlsx rows, got %q", string(bytes.TrimSpace(rowCountOutput)))
+	}
+}
+
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 	var lastErr error
 	for i := 0; i < 5; i++ {
@@ -761,4 +750,37 @@ func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("sqlite query failed after retries: %w", lastErr)
+}
+
+func waitForImportTaskStatus(t *testing.T, handler http.Handler, sessionID, taskID, wantStatus string) {
+	t.Helper()
+
+	var lastStatus string
+	for i := 0; i < 60; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var importResp map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &importResp); err != nil {
+			t.Fatalf("failed to decode import response: %v", err)
+		}
+
+		lastStatus, _ = importResp["status"].(string)
+		if lastStatus == wantStatus {
+			return
+		}
+
+		if lastStatus == "failed" {
+			t.Fatalf("import task failed: %v", importResp["error"])
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatalf("import task did not reach %q in time, last status %q", wantStatus, lastStatus)
 }

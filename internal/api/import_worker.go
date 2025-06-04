@@ -61,6 +61,20 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 				markTaskFailed(sessionDir, task, "failed to import csv into sqlite")
 				return
 			}
+		case ".xlsx":
+			schema, err = importXLSXIntoSQLite(meta.DatabasePath, filePath, tableName)
+			if err != nil {
+				schema = tableSchema{
+					TableName:   tableName,
+					SourceFile:  fileName,
+					SourceSheet: "sheet1",
+					Columns:     derivePlaceholderColumns(fileName),
+				}
+				if err := createPlaceholderSQLiteTable(meta.DatabasePath, schema); err != nil {
+					markTaskFailed(sessionDir, task, "failed to create placeholder sqlite table")
+					return
+				}
+			}
 		default:
 			schema = tableSchema{
 				TableName:   tableName,
