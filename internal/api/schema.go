@@ -33,12 +33,17 @@ func (h *Handler) handleSessionSchema(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snapshot, err := readSchemaSnapshot(sessionDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			http.Error(w, "schema snapshot not found", http.StatusConflict)
-			return
-		}
+	catalog, catalogErr := readSchemaCatalogFromDatabase(meta.DatabasePath)
+	if catalogErr != nil {
+		http.Error(w, "failed to read schema catalog", http.StatusInternalServerError)
+		return
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		http.Error(w, "failed to read schema snapshot", http.StatusInternalServerError)
+		return
+	}
+	if len(catalog) == 0 && err != nil {
+		http.Error(w, "schema snapshot not found", http.StatusConflict)
 		return
 	}
 
@@ -47,6 +52,15 @@ func (h *Handler) handleSessionSchema(w http.ResponseWriter, r *http.Request) {
 	meta.UpdatedAt = now
 	if err := writeSessionMetadata(sessionDir, meta); err != nil {
 		http.Error(w, "failed to update session metadata", http.StatusInternalServerError)
+		return
+	}
+
+	if len(catalog) > 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"session_id": sessionID,
+			"status":     meta.Status,
+			"tables":     catalog,
+		})
 		return
 	}
 

@@ -193,6 +193,14 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 	if len(schemaResp.Tables) == 0 {
 		t.Fatalf("expected at least one table in schema response")
 	}
+	firstTable := schemaResp.Tables[0]
+	if firstTable["row_count"] == nil {
+		t.Fatalf("expected schema response to include row_count from sqlite catalog")
+	}
+	columns, ok := firstTable["columns"].([]any)
+	if !ok || len(columns) == 0 {
+		t.Fatalf("expected structured columns in schema response")
+	}
 
 	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
 	statusOutput, err := exec.Command(
