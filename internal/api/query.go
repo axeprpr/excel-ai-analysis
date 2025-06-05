@@ -70,7 +70,7 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot, err := readSchemaSnapshot(sessionDir)
+	snapshot, err := loadSchemaForQuery(sessionDir, meta.DatabasePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			http.Error(w, "schema snapshot not found", http.StatusConflict)
@@ -130,6 +130,24 @@ func readSchemaSnapshot(sessionDir string) (schemaSnapshot, error) {
 		return schemaSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func loadSchemaForQuery(sessionDir, databasePath string) (schemaSnapshot, error) {
+	catalog, err := readSchemaCatalogFromDatabase(databasePath)
+	if err == nil && len(catalog) > 0 {
+		tables := make([]tableSchema, 0, len(catalog))
+		for _, table := range catalog {
+			tables = append(tables, tableSchema{
+				TableName:   table.TableName,
+				SourceFile:  table.SourceFile,
+				SourceSheet: table.SourceSheet,
+				Columns:     table.Columns,
+			})
+		}
+		return schemaSnapshot{Tables: tables}, nil
+	}
+
+	return readSchemaSnapshot(sessionDir)
 }
 
 func buildPlaceholderSQL(snapshot schemaSnapshot) string {
