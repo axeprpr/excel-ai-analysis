@@ -92,6 +92,7 @@ func (h *Handler) handleImportByID(w http.ResponseWriter, r *http.Request) {
 		"error":          task.Error,
 		"file_count":     task.FileCount,
 		"file_names":     task.FileNames,
+		"warnings":       task.Warnings,
 		"tables":         meta.Tables,
 	})
 }

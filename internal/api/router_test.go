@@ -120,6 +120,83 @@ func TestUploadRejectsUnsupportedFileType(t *testing.T) {
 	}
 }
 
+func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "legacy.xls")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("legacy xls placeholder")); err != nil {
+		t.Fatalf("failed to write xls payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+
+	warnings, ok := uploadResp["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("expected upload response warnings for xls import, got %v", uploadResp["warnings"])
+	}
+
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	importReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
+	importRec := httptest.NewRecorder()
+	handler.ServeHTTP(importRec, importReq)
+	if importRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, importRec.Code)
+	}
+
+	var importResp map[string]any
+	if err := json.Unmarshal(importRec.Body.Bytes(), &importResp); err != nil {
+		t.Fatalf("failed to decode import response: %v", err)
+	}
+
+	taskWarnings, ok := importResp["warnings"].([]any)
+	if !ok || len(taskWarnings) == 0 {
+		t.Fatalf("expected import task warnings for xls import, got %v", importResp["warnings"])
+	}
+}
+
 func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 	dataDir := t.TempDir()
 	handler := NewHandler(dataDir)

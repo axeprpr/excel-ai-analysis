@@ -28,6 +28,7 @@ type importTask struct {
 	Error      string     `json:"error,omitempty"`
 	FileCount  int        `json:"file_count"`
 	FileNames  []string   `json:"file_names"`
+	Warnings   []string   `json:"warnings,omitempty"`
 }
 
 func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +115,7 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 		"session_status": meta.Status,
 		"file_count":     len(savedNames),
 		"file_names":     savedNames,
+		"warnings":       task.Warnings,
 		"created_at":     task.CreatedAt,
 	})
 }
@@ -133,6 +135,7 @@ func writeImportTask(sessionDir, sessionID string, fileNames []string, now time.
 		UpdatedAt: now,
 		FileCount: len(fileNames),
 		FileNames: fileNames,
+		Warnings:  buildImportWarnings(fileNames),
 	}
 
 	importDir := filepath.Join(sessionDir, "imports")
@@ -211,6 +214,17 @@ func isSupportedUploadFile(name string) bool {
 	default:
 		return false
 	}
+}
+
+func buildImportWarnings(fileNames []string) []string {
+	warnings := make([]string, 0, 1)
+	for _, name := range fileNames {
+		if strings.EqualFold(filepath.Ext(name), ".xls") {
+			warnings = append(warnings, ".xls files currently use placeholder import; real parsing is only implemented for .csv and .xlsx.")
+			break
+		}
+	}
+	return warnings
 }
 
 func syncImportTaskToDatabase(databasePath string, task importTask) error {
