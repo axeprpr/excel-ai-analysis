@@ -265,6 +265,8 @@ func buildSQLForQuestion(snapshot schemaSnapshot, question string) string {
 	mode := detectQueryMode(question, table)
 
 	switch mode {
+	case "count":
+		return "SELECT COUNT(*) AS total_count FROM " + table.TableName + ";"
 	case "trend":
 		timeColumn := firstTimeColumn(table)
 		if timeColumn != "" && metric != "" {
@@ -293,6 +295,8 @@ func selectedColumnsForMode(table tableSchema, mode string) []string {
 	metric := firstMetricColumn(table)
 
 	switch mode {
+	case "count":
+		return []string{"total_count"}
 	case "trend":
 		if firstTimeColumn(table) != "" && metric != "" {
 			return []string{"time_bucket", "total_value"}
@@ -340,6 +344,13 @@ func detectQueryMode(question string, table tableSchema) string {
 		strings.Contains(q, "最高"),
 		strings.Contains(q, "最多"):
 		return "topn"
+	case strings.Contains(q, "count"),
+		strings.Contains(q, "how many"),
+		strings.Contains(q, "number of"),
+		strings.Contains(q, "多少"),
+		strings.Contains(q, "几个"),
+		strings.Contains(q, "几条"):
+		return "count"
 	case strings.Contains(q, "sum"),
 		strings.Contains(q, "total"),
 		strings.Contains(q, "amount"),

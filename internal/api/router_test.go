@@ -604,6 +604,35 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 		t.Fatalf("expected aggregate summary to mention aggregate mode, got %q", aggSummary)
 	}
 
+	countBody := bytes.NewBufferString(`{"question":"How many sales records are there?"}`)
+	countReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", countBody)
+	countReq.Header.Set("Content-Type", "application/json")
+	countRec := httptest.NewRecorder()
+	handler.ServeHTTP(countRec, countReq)
+	if countRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, countRec.Code)
+	}
+
+	var countResp map[string]any
+	if err := json.Unmarshal(countRec.Body.Bytes(), &countResp); err != nil {
+		t.Fatalf("failed to decode count query response: %v", err)
+	}
+
+	countSQL, _ := countResp["sql"].(string)
+	if !strings.Contains(strings.ToUpper(countSQL), "COUNT(*)") {
+		t.Fatalf("expected count query sql to contain COUNT(*), got %q", countSQL)
+	}
+
+	countPlan, ok := countResp["query_plan"].(map[string]any)
+	if !ok || countPlan["mode"] != "count" {
+		t.Fatalf("expected count query plan mode, got %v", countResp["query_plan"])
+	}
+
+	countColumns, ok := countResp["columns"].([]any)
+	if !ok || len(countColumns) != 1 || countColumns[0] != "total_count" {
+		t.Fatalf("expected count query columns to be [total_count], got %v", countResp["columns"])
+	}
+
 	topBody := bytes.NewBufferString(`{"question":"What are the top categories by sales?"}`)
 	topReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", topBody)
 	topReq.Header.Set("Content-Type", "application/json")
