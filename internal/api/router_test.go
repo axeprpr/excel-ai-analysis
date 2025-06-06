@@ -778,6 +778,39 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	if !ok || len(trendColumns) != 2 {
 		t.Fatalf("expected 2 ordered columns for trend query, got %v", trendResp["columns"])
 	}
+
+	dbReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/database", nil)
+	dbRec := httptest.NewRecorder()
+	handler.ServeHTTP(dbRec, dbReq)
+	if dbRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, dbRec.Code)
+	}
+
+	var dbResp map[string]any
+	if err := json.Unmarshal(dbRec.Body.Bytes(), &dbResp); err != nil {
+		t.Fatalf("failed to decode database response: %v", err)
+	}
+
+	catalog, ok := dbResp["catalog"].([]any)
+	if !ok || len(catalog) == 0 {
+		t.Fatalf("expected catalog in database response")
+	}
+
+	firstCatalog, ok := catalog[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first catalog entry to be an object")
+	}
+	previewRows, ok := firstCatalog["preview_rows"].([]any)
+	if !ok || len(previewRows) != 2 {
+		t.Fatalf("expected 2 preview rows for imported csv table, got %v", firstCatalog["preview_rows"])
+	}
+	firstPreviewRow, ok := previewRows[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first preview row to be an object")
+	}
+	if firstPreviewRow["category"] != "A" {
+		t.Fatalf("expected first preview row category to be A, got %v", firstPreviewRow["category"])
+	}
 }
 
 func TestXLSXUploadImportsRowsIntoSQLite(t *testing.T) {
