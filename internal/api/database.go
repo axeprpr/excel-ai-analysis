@@ -19,6 +19,7 @@ type databaseCatalogTable struct {
 	SourceSheet string         `json:"source_sheet"`
 	RowCount    int            `json:"row_count"`
 	Columns     []schemaColumn `json:"columns"`
+	PreviewRows []map[string]any `json:"preview_rows"`
 }
 
 type databaseImportTask struct {
@@ -182,6 +183,19 @@ ORDER BY column_name;
 		}
 
 		if err := json.Unmarshal(columnTrimmed, &catalog[i].Columns); err != nil {
+			return nil, err
+		}
+
+		previewOutput, err := sqliteQuery(databasePath, `SELECT * FROM `+sqliteIdent(catalog[i].TableName)+` LIMIT 3;`)
+		if err != nil {
+			return nil, err
+		}
+		previewTrimmed := bytes.TrimSpace(previewOutput)
+		if len(previewTrimmed) == 0 {
+			catalog[i].PreviewRows = []map[string]any{}
+			continue
+		}
+		if err := json.Unmarshal(previewTrimmed, &catalog[i].PreviewRows); err != nil {
 			return nil, err
 		}
 	}

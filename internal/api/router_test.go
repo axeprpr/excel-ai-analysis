@@ -552,6 +552,9 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 	if firstTable["row_count"] == nil {
 		t.Fatalf("expected catalog row_count to be populated")
 	}
+	if _, ok := firstTable["preview_rows"].([]any); !ok {
+		t.Fatalf("expected catalog preview_rows to be populated")
+	}
 	columns, ok := firstTable["columns"].([]any)
 	if !ok || len(columns) == 0 {
 		t.Fatalf("expected catalog columns to be populated")
