@@ -24,6 +24,8 @@ type schemaSnapshot struct {
 
 type queryPlan struct {
 	SourceTable     string   `json:"source_table"`
+	SourceFile      string   `json:"source_file"`
+	SourceSheet     string   `json:"source_sheet"`
 	SelectedColumns []string `json:"selected_columns"`
 	Filters         []string `json:"filters"`
 	Question        string   `json:"question"`
@@ -249,6 +251,8 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 	if len(snapshot.Tables) == 0 {
 		return queryPlan{
 			SourceTable:     "",
+			SourceFile:      "",
+			SourceSheet:     "",
 			SelectedColumns: []string{},
 			Filters:         []string{},
 			Question:        question,
@@ -263,6 +267,8 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 
 	return queryPlan{
 		SourceTable:     table.TableName,
+		SourceFile:      table.SourceFile,
+		SourceSheet:     table.SourceSheet,
 		SelectedColumns: selectedColumns,
 		Filters:         []string{},
 		Question:        question,

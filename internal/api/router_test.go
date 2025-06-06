@@ -422,6 +422,14 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 	if sourceTable == "" {
 		t.Fatalf("expected source_table in query_plan")
 	}
+	sourceFile, _ := queryPlan["source_file"].(string)
+	if sourceFile == "" {
+		t.Fatalf("expected source_file in query_plan")
+	}
+	sourceSheet, _ := queryPlan["source_sheet"].(string)
+	if sourceSheet == "" {
+		t.Fatalf("expected source_sheet in query_plan")
+	}
 
 	selectedColumns, ok := queryPlan["selected_columns"].([]any)
 	if !ok || len(selectedColumns) == 0 {
