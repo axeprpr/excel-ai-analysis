@@ -691,6 +691,9 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	if !strings.Contains(aggSummary, "aggregate mode") {
 		t.Fatalf("expected aggregate summary to mention aggregate mode, got %q", aggSummary)
 	}
+	if !strings.Contains(aggSummary, "sales.csv") {
+		t.Fatalf("expected aggregate summary to include source file, got %q", aggSummary)
+	}
 
 	countBody := bytes.NewBufferString(`{"question":"How many sales records are there?"}`)
 	countReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", countBody)

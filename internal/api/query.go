@@ -172,7 +172,14 @@ func buildQuerySummary(plan queryPlan, executed bool, rowCount int) string {
 	if executed {
 		status = "executed against SQLite"
 	}
-	return "Query on table " + plan.SourceTable + " ran in " + plan.Mode + " mode and " + status + ", returning " + strconv.Itoa(rowCount) + " row(s)."
+	source := plan.SourceTable
+	if plan.SourceFile != "" {
+		source += " from " + plan.SourceFile
+	}
+	if plan.SourceSheet != "" {
+		source += " (" + plan.SourceSheet + ")"
+	}
+	return "Query on " + source + " ran in " + plan.Mode + " mode and " + status + ", returning " + strconv.Itoa(rowCount) + " row(s)."
 }
 
 func buildQueryColumns(snapshot schemaSnapshot) []string {
