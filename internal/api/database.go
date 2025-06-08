@@ -90,16 +90,24 @@ func (h *Handler) handleSessionDatabase(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	totalRowCount := 0
+	for _, table := range catalog {
+		totalRowCount += table.RowCount
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":    sessionID,
-		"status":        meta.Status,
-		"database_path": meta.DatabasePath,
-		"database_size": info.Size(),
-		"modified_at":   info.ModTime().UTC(),
-		"tables":        meta.Tables,
-		"sqlite_tables": sqliteTables,
-		"catalog":       catalog,
-		"import_tasks":  importTasks,
+		"session_id":        sessionID,
+		"status":            meta.Status,
+		"database_path":     meta.DatabasePath,
+		"database_size":     info.Size(),
+		"modified_at":       info.ModTime().UTC(),
+		"tables":            meta.Tables,
+		"sqlite_tables":     sqliteTables,
+		"catalog":           catalog,
+		"import_tasks":      importTasks,
+		"table_count":       len(catalog),
+		"total_row_count":   totalRowCount,
+		"import_task_count": len(importTasks),
 	})
 }
 

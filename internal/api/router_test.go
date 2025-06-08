@@ -517,6 +517,15 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 	if !ok || len(importTasks) == 0 {
 		t.Fatalf("expected import_tasks in database response")
 	}
+	if dbResp["table_count"] == nil {
+		t.Fatalf("expected table_count in database response")
+	}
+	if dbResp["total_row_count"] == nil {
+		t.Fatalf("expected total_row_count in database response")
+	}
+	if dbResp["import_task_count"] == nil {
+		t.Fatalf("expected import_task_count in database response")
+	}
 
 	hasSessionMeta := false
 	hasImportTasks := false
@@ -813,6 +822,15 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	}
 	if firstPreviewRow["category"] != "A" {
 		t.Fatalf("expected first preview row category to be A, got %v", firstPreviewRow["category"])
+	}
+	if dbResp["table_count"] != float64(1) {
+		t.Fatalf("expected table_count to be 1, got %v", dbResp["table_count"])
+	}
+	if dbResp["total_row_count"] != float64(2) {
+		t.Fatalf("expected total_row_count to be 2, got %v", dbResp["total_row_count"])
+	}
+	if dbResp["import_task_count"] != float64(1) {
+		t.Fatalf("expected import_task_count to be 1, got %v", dbResp["import_task_count"])
 	}
 }
 
