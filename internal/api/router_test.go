@@ -195,6 +195,36 @@ func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
 	if !ok || len(taskWarnings) == 0 {
 		t.Fatalf("expected import task warnings for xls import, got %v", importResp["warnings"])
 	}
+
+	queryBody := bytes.NewBufferString(`{"question":"How many rows are in the legacy file?"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode query response: %v", err)
+	}
+
+	queryWarnings, ok := queryResp["warnings"].([]any)
+	if !ok || len(queryWarnings) < 2 {
+		t.Fatalf("expected query warnings for xls import, got %v", queryResp["warnings"])
+	}
+	foundPlaceholderWarning := false
+	for _, item := range queryWarnings {
+		text, _ := item.(string)
+		if strings.Contains(text, "legacy .xls") {
+			foundPlaceholderWarning = true
+			break
+		}
+	}
+	if !foundPlaceholderWarning {
+		t.Fatalf("expected xls-specific placeholder warning in query response, got %v", queryResp["warnings"])
+	}
 }
 
 func TestUploadCreatesImportTaskAndSchema(t *testing.T) {

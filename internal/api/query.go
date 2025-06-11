@@ -113,10 +113,7 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 			"y":      pickVisualizationY(snapshot),
 			"tables": meta.Tables,
 		},
-		"warnings": []string{
-			queryWarning(executed),
-			"AI text-to-SQL generation is not implemented yet.",
-		},
+		"warnings": queryWarnings(plan, executed),
 	})
 }
 
@@ -252,6 +249,17 @@ func queryWarning(executed bool) string {
 		return "Query executed against the local SQLite session database."
 	}
 	return "Query execution fell back to placeholder response data."
+}
+
+func queryWarnings(plan queryPlan, executed bool) []string {
+	warnings := []string{
+		queryWarning(executed),
+		"AI text-to-SQL generation is not implemented yet.",
+	}
+	if strings.EqualFold(filepath.Ext(plan.SourceFile), ".xls") {
+		warnings = append(warnings, "This query is based on placeholder schema for a legacy .xls upload.")
+	}
+	return warnings
 }
 
 func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
