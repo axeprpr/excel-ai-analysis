@@ -26,6 +26,14 @@ type sessionMetadata struct {
 	Tables         []string  `json:"tables"`
 }
 
+type sessionResponse struct {
+	sessionMetadata
+	UploadedFileCount int `json:"uploaded_file_count"`
+	TableCount        int `json:"table_count"`
+	ImportTaskCount   int `json:"import_task_count"`
+	TotalRowCount     int `json:"total_row_count"`
+}
+
 func (h *Handler) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -95,7 +103,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, meta)
+	writeJSON(w, http.StatusCreated, buildSessionResponse(meta))
 }
 
 func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +120,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions := make([]sessionMetadata, 0, len(entries))
+	sessions := make([]sessionResponse, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -126,7 +134,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to read session metadata", http.StatusInternalServerError)
 			return
 		}
-		sessions = append(sessions, meta)
+		sessions = append(sessions, buildSessionResponse(meta))
 	}
 
 	sort.Slice(sessions, func(i, j int) bool {
@@ -157,7 +165,7 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request, sessionID s
 		return
 	}
 
-	writeJSON(w, http.StatusOK, meta)
+	writeJSON(w, http.StatusOK, buildSessionResponse(meta))
 }
 
 func (h *Handler) deleteSession(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -215,6 +223,34 @@ func writeSessionMetadata(sessionDir string, meta sessionMetadata) error {
 	}
 
 	return os.WriteFile(filepath.Join(sessionDir, "session.json"), data, 0o644)
+}
+
+func buildSessionResponse(meta sessionMetadata) sessionResponse {
+	resp := sessionResponse{
+		sessionMetadata:    meta,
+		UploadedFileCount:  len(meta.UploadedFiles),
+		TableCount:         len(meta.Tables),
+		ImportTaskCount:    0,
+		TotalRowCount:      0,
+	}
+
+	if meta.DatabasePath == "" {
+		return resp
+	}
+
+	if tasks, err := readImportTaskCatalogFromDatabase(meta.DatabasePath); err == nil {
+		resp.ImportTaskCount = len(tasks)
+	}
+	if catalog, err := readSchemaCatalogFromDatabase(meta.DatabasePath); err == nil {
+		totalRowCount := 0
+		for _, table := range catalog {
+			totalRowCount += table.RowCount
+		}
+		resp.TableCount = len(catalog)
+		resp.TotalRowCount = totalRowCount
+	}
+
+	return resp
 }
 
 func initializeSessionWorkspace(sessionDir, databasePath string) error {

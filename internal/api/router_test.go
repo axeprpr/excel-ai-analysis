@@ -74,6 +74,18 @@ func TestCreateAndListSessions(t *testing.T) {
 	if len(listed.Sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(listed.Sessions))
 	}
+	if listed.Sessions[0]["uploaded_file_count"] != float64(0) {
+		t.Fatalf("expected uploaded_file_count to be 0, got %v", listed.Sessions[0]["uploaded_file_count"])
+	}
+	if listed.Sessions[0]["table_count"] != float64(0) {
+		t.Fatalf("expected table_count to be 0, got %v", listed.Sessions[0]["table_count"])
+	}
+	if listed.Sessions[0]["import_task_count"] != float64(0) {
+		t.Fatalf("expected import_task_count to be 0, got %v", listed.Sessions[0]["import_task_count"])
+	}
+	if listed.Sessions[0]["total_row_count"] != float64(0) {
+		t.Fatalf("expected total_row_count to be 0, got %v", listed.Sessions[0]["total_row_count"])
+	}
 }
 
 func TestUploadRejectsUnsupportedFileType(t *testing.T) {
@@ -861,6 +873,31 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	}
 	if dbResp["import_task_count"] != float64(1) {
 		t.Fatalf("expected import_task_count to be 1, got %v", dbResp["import_task_count"])
+	}
+
+	sessionReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
+	sessionRec := httptest.NewRecorder()
+	handler.ServeHTTP(sessionRec, sessionReq)
+	if sessionRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, sessionRec.Code)
+	}
+
+	var sessionResp map[string]any
+	if err := json.Unmarshal(sessionRec.Body.Bytes(), &sessionResp); err != nil {
+		t.Fatalf("failed to decode session response: %v", err)
+	}
+
+	if sessionResp["uploaded_file_count"] != float64(1) {
+		t.Fatalf("expected uploaded_file_count to be 1, got %v", sessionResp["uploaded_file_count"])
+	}
+	if sessionResp["table_count"] != float64(1) {
+		t.Fatalf("expected session table_count to be 1, got %v", sessionResp["table_count"])
+	}
+	if sessionResp["import_task_count"] != float64(1) {
+		t.Fatalf("expected session import_task_count to be 1, got %v", sessionResp["import_task_count"])
+	}
+	if sessionResp["total_row_count"] != float64(2) {
+		t.Fatalf("expected session total_row_count to be 2, got %v", sessionResp["total_row_count"])
 	}
 }
 
