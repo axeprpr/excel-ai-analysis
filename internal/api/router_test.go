@@ -188,6 +188,17 @@ func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
 	if taskID == "" {
 		t.Fatalf("expected task_id in upload response")
 	}
+	files, ok := uploadResp["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("expected upload response files metadata, got %v", uploadResp["files"])
+	}
+	firstFile, ok := files[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first upload file entry to be an object")
+	}
+	if firstFile["extension"] != ".xls" {
+		t.Fatalf("expected upload file extension to be .xls, got %v", firstFile["extension"])
+	}
 
 	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
 
@@ -290,6 +301,17 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 	taskID, _ := uploadResp["task_id"].(string)
 	if taskID == "" {
 		t.Fatalf("expected task_id in upload response")
+	}
+	files, ok := uploadResp["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("expected upload response files metadata, got %v", uploadResp["files"])
+	}
+	firstFile, ok := files[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first upload file entry to be an object")
+	}
+	if firstFile["extension"] != ".xlsx" {
+		t.Fatalf("expected upload file extension to be .xlsx, got %v", firstFile["extension"])
 	}
 
 	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")

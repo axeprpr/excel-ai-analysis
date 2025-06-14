@@ -31,6 +31,12 @@ type importTask struct {
 	Warnings   []string   `json:"warnings,omitempty"`
 }
 
+type uploadedFileInfo struct {
+	Name      string `json:"name"`
+	Extension string `json:"extension"`
+	Size      int64  `json:"size"`
+}
+
 func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -72,6 +78,7 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	savedNames := make([]string, 0, len(files))
+	savedFiles := make([]uploadedFileInfo, 0, len(files))
 	for _, fh := range files {
 		if !isSupportedUploadFile(fh.Filename) {
 			http.Error(w, "unsupported file type", http.StatusBadRequest)
@@ -84,6 +91,11 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		savedNames = append(savedNames, savedName)
+		savedFiles = append(savedFiles, uploadedFileInfo{
+			Name:      savedName,
+			Extension: strings.ToLower(filepath.Ext(savedName)),
+			Size:      fh.Size,
+		})
 	}
 
 	now := time.Now().UTC()
@@ -115,6 +127,7 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 		"session_status": meta.Status,
 		"file_count":     len(savedNames),
 		"file_names":     savedNames,
+		"files":          savedFiles,
 		"warnings":       task.Warnings,
 		"created_at":     task.CreatedAt,
 	})
