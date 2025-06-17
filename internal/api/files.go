@@ -12,6 +12,7 @@ import (
 
 type sessionFile struct {
 	Name         string    `json:"name"`
+	Extension    string    `json:"extension"`
 	Size         int64     `json:"size"`
 	ModifiedAt   time.Time `json:"modified_at"`
 	RelativePath string    `json:"relative_path"`
@@ -58,6 +59,8 @@ func (h *Handler) handleSessionFiles(w http.ResponseWriter, r *http.Request) {
 		"session_id": sessionID,
 		"status":     meta.Status,
 		"files":      files,
+		"file_count": len(files),
+		"total_size": totalFileSize(files),
 	})
 }
 
@@ -84,6 +87,7 @@ func listSessionFiles(sessionDir string) ([]sessionFile, error) {
 
 		files = append(files, sessionFile{
 			Name:         entry.Name(),
+			Extension:    strings.ToLower(filepath.Ext(entry.Name())),
 			Size:         info.Size(),
 			ModifiedAt:   info.ModTime().UTC(),
 			RelativePath: filepath.ToSlash(filepath.Join("uploads", entry.Name())),
@@ -95,4 +99,12 @@ func listSessionFiles(sessionDir string) ([]sessionFile, error) {
 	})
 
 	return files, nil
+}
+
+func totalFileSize(files []sessionFile) int64 {
+	var total int64
+	for _, file := range files {
+		total += file.Size
+	}
+	return total
 }

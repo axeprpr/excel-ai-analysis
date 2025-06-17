@@ -696,6 +696,35 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 
 	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
 
+	filesReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files", nil)
+	filesRec := httptest.NewRecorder()
+	handler.ServeHTTP(filesRec, filesReq)
+	if filesRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, filesRec.Code)
+	}
+
+	var filesResp map[string]any
+	if err := json.Unmarshal(filesRec.Body.Bytes(), &filesResp); err != nil {
+		t.Fatalf("failed to decode files response: %v", err)
+	}
+	if filesResp["file_count"] != float64(1) {
+		t.Fatalf("expected file_count to be 1, got %v", filesResp["file_count"])
+	}
+	filesList, ok := filesResp["files"].([]any)
+	if !ok || len(filesList) != 1 {
+		t.Fatalf("expected one file in files response, got %v", filesResp["files"])
+	}
+	firstListedFile, ok := filesList[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first files entry to be an object")
+	}
+	if firstListedFile["extension"] != ".csv" {
+		t.Fatalf("expected listed file extension to be .csv, got %v", firstListedFile["extension"])
+	}
+	if filesResp["total_size"] == nil {
+		t.Fatalf("expected total_size in files response")
+	}
+
 	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
 	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
 	if err != nil {
