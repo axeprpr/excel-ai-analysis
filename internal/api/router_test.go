@@ -218,6 +218,38 @@ func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
 	if !ok || len(taskWarnings) == 0 {
 		t.Fatalf("expected import task warnings for xls import, got %v", importResp["warnings"])
 	}
+	if importResp["warning_count"] != float64(1) {
+		t.Fatalf("expected import warning_count to be 1, got %v", importResp["warning_count"])
+	}
+	if importResp["duration_ms"] == nil {
+		t.Fatalf("expected import duration_ms to be populated")
+	}
+
+	importsReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports", nil)
+	importsRec := httptest.NewRecorder()
+	handler.ServeHTTP(importsRec, importsReq)
+	if importsRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, importsRec.Code)
+	}
+
+	var importsResp map[string]any
+	if err := json.Unmarshal(importsRec.Body.Bytes(), &importsResp); err != nil {
+		t.Fatalf("failed to decode imports response: %v", err)
+	}
+	tasks, ok := importsResp["tasks"].([]any)
+	if !ok || len(tasks) == 0 {
+		t.Fatalf("expected tasks in imports response, got %v", importsResp["tasks"])
+	}
+	firstTask, ok := tasks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first imports entry to be an object")
+	}
+	if firstTask["warning_count"] != float64(1) {
+		t.Fatalf("expected imports warning_count to be 1, got %v", firstTask["warning_count"])
+	}
+	if firstTask["duration_ms"] == nil {
+		t.Fatalf("expected imports duration_ms to be populated")
+	}
 
 	queryBody := bytes.NewBufferString(`{"question":"How many rows are in the legacy file?"}`)
 	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
@@ -1058,6 +1090,10 @@ func waitForImportTaskStatus(t *testing.T, handler http.Handler, sessionID, task
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
+		if rec.Code == http.StatusInternalServerError {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 		}

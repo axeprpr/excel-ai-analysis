@@ -42,7 +42,7 @@ func (h *Handler) handleImports(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id":     sessionID,
 		"session_status": meta.Status,
-		"tasks":          tasks,
+		"tasks":          buildImportTaskResponses(tasks),
 	})
 }
 
@@ -79,22 +79,11 @@ func (h *Handler) handleImportByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":     sessionID,
-		"task_id":        task.TaskID,
-		"type":           task.Type,
-		"status":         task.Status,
-		"session_status": meta.Status,
-		"created_at":     task.CreatedAt,
-		"started_at":     task.StartedAt,
-		"finished_at":    task.FinishedAt,
-		"updated_at":     task.UpdatedAt,
-		"error":          task.Error,
-		"file_count":     task.FileCount,
-		"file_names":     task.FileNames,
-		"warnings":       task.Warnings,
-		"tables":         meta.Tables,
-	})
+	resp := buildImportTaskResponse(task)
+	resp["session_id"] = sessionID
+	resp["session_status"] = meta.Status
+	resp["tables"] = meta.Tables
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func parseImportPath(path string) (string, string, bool) {
@@ -154,4 +143,42 @@ func readAllImportTasks(sessionDir string) ([]importTask, error) {
 	})
 
 	return tasks, nil
+}
+
+func buildImportTaskResponses(tasks []importTask) []map[string]any {
+	out := make([]map[string]any, 0, len(tasks))
+	for _, task := range tasks {
+		out = append(out, buildImportTaskResponse(task))
+	}
+	return out
+}
+
+func buildImportTaskResponse(task importTask) map[string]any {
+	resp := map[string]any{
+		"task_id":        task.TaskID,
+		"type":           task.Type,
+		"status":         task.Status,
+		"created_at":     task.CreatedAt,
+		"started_at":     task.StartedAt,
+		"finished_at":    task.FinishedAt,
+		"updated_at":     task.UpdatedAt,
+		"error":          task.Error,
+		"file_count":     task.FileCount,
+		"file_names":     task.FileNames,
+		"warnings":       task.Warnings,
+		"warning_count":  len(task.Warnings),
+		"duration_ms":    importTaskDurationMillis(task),
+	}
+	return resp
+}
+
+func importTaskDurationMillis(task importTask) int64 {
+	if task.StartedAt == nil || task.FinishedAt == nil {
+		return 0
+	}
+	duration := task.FinishedAt.Sub(*task.StartedAt)
+	if duration < 0 {
+		return 0
+	}
+	return duration.Milliseconds()
 }
