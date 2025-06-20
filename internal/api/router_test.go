@@ -236,6 +236,19 @@ func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
 	if err := json.Unmarshal(importsRec.Body.Bytes(), &importsResp); err != nil {
 		t.Fatalf("failed to decode imports response: %v", err)
 	}
+	if importsResp["task_count"] != float64(1) {
+		t.Fatalf("expected imports task_count to be 1, got %v", importsResp["task_count"])
+	}
+	if importsResp["warning_count_total"] != float64(1) {
+		t.Fatalf("expected imports warning_count_total to be 1, got %v", importsResp["warning_count_total"])
+	}
+	statusCounts, ok := importsResp["status_counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected imports status_counts to be an object, got %v", importsResp["status_counts"])
+	}
+	if statusCounts["completed"] != float64(1) {
+		t.Fatalf("expected imports completed count to be 1, got %v", statusCounts["completed"])
+	}
 	tasks, ok := importsResp["tasks"].([]any)
 	if !ok || len(tasks) == 0 {
 		t.Fatalf("expected tasks in imports response, got %v", importsResp["tasks"])

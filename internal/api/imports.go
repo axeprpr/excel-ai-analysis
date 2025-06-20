@@ -43,6 +43,9 @@ func (h *Handler) handleImports(w http.ResponseWriter, r *http.Request) {
 		"session_id":     sessionID,
 		"session_status": meta.Status,
 		"tasks":          buildImportTaskResponses(tasks),
+		"task_count":     len(tasks),
+		"status_counts":  importTaskStatusCounts(tasks),
+		"warning_count_total": importTaskWarningCount(tasks),
 	})
 }
 
@@ -181,4 +184,20 @@ func importTaskDurationMillis(task importTask) int64 {
 		return 0
 	}
 	return duration.Milliseconds()
+}
+
+func importTaskStatusCounts(tasks []importTask) map[string]int {
+	counts := make(map[string]int)
+	for _, task := range tasks {
+		counts[task.Status]++
+	}
+	return counts
+}
+
+func importTaskWarningCount(tasks []importTask) int {
+	total := 0
+	for _, task := range tasks {
+		total += len(task.Warnings)
+	}
+	return total
 }
