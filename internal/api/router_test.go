@@ -521,6 +521,16 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 	if visualization["type"] == "" {
 		t.Fatalf("expected visualization type in query response")
 	}
+	if visualization["source_table"] == "" {
+		t.Fatalf("expected visualization source_table in query response")
+	}
+	if visualization["preferred_format"] == "" {
+		t.Fatalf("expected visualization preferred_format in query response")
+	}
+	series, ok := visualization["series"].([]any)
+	if !ok || len(series) == 0 {
+		t.Fatalf("expected visualization series in query response")
+	}
 
 	queryPlan, ok := queryResp["query_plan"].(map[string]any)
 	if !ok {

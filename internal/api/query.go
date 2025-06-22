@@ -107,11 +107,14 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		"summary":    buildQuerySummary(plan, executed, len(rows)),
 		"query_plan": plan,
 		"visualization": map[string]any{
-			"type":   suggestVisualization(req.Question),
-			"title":  req.Question,
-			"x":      pickVisualizationX(snapshot),
-			"y":      pickVisualizationY(snapshot),
-			"tables": meta.Tables,
+			"type":             suggestVisualization(req.Question),
+			"title":            req.Question,
+			"x":                pickVisualizationX(snapshot),
+			"y":                pickVisualizationY(snapshot),
+			"series":           pickVisualizationSeries(plan, snapshot),
+			"preferred_format": preferredVisualizationFormat(plan),
+			"source_table":     plan.SourceTable,
+			"tables":           meta.Tables,
 		},
 		"warnings": queryWarnings(plan, executed),
 	})
@@ -513,6 +516,26 @@ func suggestVisualization(question string) string {
 		return "bar"
 	case strings.Contains(q, "占比"), strings.Contains(q, "比例"), strings.Contains(q, "share"):
 		return "pie"
+	default:
+		return "table"
+	}
+}
+
+func pickVisualizationSeries(plan queryPlan, snapshot schemaSnapshot) []string {
+	if len(plan.SelectedColumns) > 1 {
+		return []string{plan.SelectedColumns[len(plan.SelectedColumns)-1]}
+	}
+	y := pickVisualizationY(snapshot)
+	if y == "" {
+		return []string{}
+	}
+	return []string{y}
+}
+
+func preferredVisualizationFormat(plan queryPlan) string {
+	switch plan.Mode {
+	case "trend", "topn", "aggregate", "count":
+		return "chart"
 	default:
 		return "table"
 	}
