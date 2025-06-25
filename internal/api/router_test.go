@@ -379,6 +379,12 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 	if len(schemaResp.Tables) == 0 {
 		t.Fatalf("expected at least one table in schema response")
 	}
+	if schemaResp.Tables[0]["column_count"] == nil {
+		t.Fatalf("expected schema response to include column_count")
+	}
+	if _, ok := schemaResp.Tables[0]["semantic_counts"].(map[string]any); !ok {
+		t.Fatalf("expected schema response to include semantic_counts")
+	}
 	firstTable := schemaResp.Tables[0]
 	if firstTable["row_count"] == nil {
 		t.Fatalf("expected schema response to include row_count from sqlite catalog")
