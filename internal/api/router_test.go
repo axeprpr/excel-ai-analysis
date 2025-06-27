@@ -518,6 +518,12 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 	if !ok || len(rows) == 0 {
 		t.Fatalf("expected non-empty rows in query response")
 	}
+	if queryResp["row_count"] == nil {
+		t.Fatalf("expected row_count in query response")
+	}
+	if queryResp["executed"] == nil {
+		t.Fatalf("expected executed flag in query response")
+	}
 
 	visualization, ok := queryResp["visualization"].(map[string]any)
 	if !ok {

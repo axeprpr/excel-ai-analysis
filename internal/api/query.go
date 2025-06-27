@@ -104,6 +104,8 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		"sql":        plan.SQL,
 		"rows":       rows,
 		"columns":    columns,
+		"row_count":  len(rows),
+		"executed":   executed,
 		"summary":    buildQuerySummary(plan, executed, len(rows)),
 		"query_plan": plan,
 		"visualization": map[string]any{
