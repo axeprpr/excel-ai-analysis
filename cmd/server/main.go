@@ -50,11 +50,27 @@ func newServer(addr, dataDir string) *http.Server {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"service": "excel-ai-analysis",
 			"status":  "ok",
+			"version": "dev",
+			"capabilities": []string{
+				"session-isolated sqlite databases",
+				"multi-file spreadsheet uploads",
+				"csv and xlsx import into sqlite",
+				"text-to-sql style query planning",
+				"chart-oriented query metadata",
+			},
 			"routes": []string{
 				"GET /",
 				"GET /healthz",
 				"GET /api/sessions",
 				"POST /api/sessions",
+				"GET /api/sessions/:session_id",
+				"GET /api/sessions/:session_id/files",
+				"POST /api/sessions/:session_id/files/upload",
+				"GET /api/sessions/:session_id/imports",
+				"GET /api/sessions/:session_id/imports/:task_id",
+				"GET /api/sessions/:session_id/schema",
+				"GET /api/sessions/:session_id/database",
+				"POST /api/sessions/:session_id/query",
 			},
 		})
 	})

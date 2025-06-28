@@ -25,6 +25,17 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	if rootResp["service"] != "excel-ai-analysis" {
 		t.Fatalf("unexpected service value: %v", rootResp["service"])
 	}
+	if rootResp["version"] != "dev" {
+		t.Fatalf("unexpected version value: %v", rootResp["version"])
+	}
+	capabilities, ok := rootResp["capabilities"].([]any)
+	if !ok || len(capabilities) == 0 {
+		t.Fatalf("expected capabilities in root response")
+	}
+	routes, ok := rootResp["routes"].([]any)
+	if !ok || len(routes) < 6 {
+		t.Fatalf("expected expanded route list in root response")
+	}
 
 	healthReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	healthRec := httptest.NewRecorder()
