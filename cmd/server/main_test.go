@@ -44,4 +44,20 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	if healthRec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, healthRec.Code)
 	}
+
+	readyReq := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	readyRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(readyRec, readyReq)
+
+	if readyRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, readyRec.Code)
+	}
+
+	var readyResp map[string]any
+	if err := json.Unmarshal(readyRec.Body.Bytes(), &readyResp); err != nil {
+		t.Fatalf("failed to decode ready response: %v", err)
+	}
+	if readyResp["status"] != "ok" {
+		t.Fatalf("unexpected ready status: %v", readyResp["status"])
+	}
 }

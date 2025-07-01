@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/axeprpr/excel-ai-analysis/internal/api"
@@ -84,6 +86,42 @@ func newServer(addr, dataDir string) *http.Server {
 		_ = json.NewEncoder(w).Encode(healthResponse{
 			Service: "excel-ai-analysis",
 			Status:  "ok",
+		})
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		status := "ok"
+		checks := map[string]string{
+			"sqlite3": "ok",
+			"data_dir": "ok",
+		}
+
+		if _, err := exec.LookPath("sqlite3"); err != nil {
+			status = "degraded"
+			checks["sqlite3"] = "missing"
+		}
+
+		sessionsDir := filepath.Join(dataDir, "sessions")
+		if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+			status = "degraded"
+			checks["data_dir"] = "unavailable"
+		}
+
+		code := http.StatusOK
+		if status != "ok" {
+			code = http.StatusServiceUnavailable
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"service": "excel-ai-analysis",
+			"status":  status,
+			"checks":  checks,
 		})
 	})
 	mux.Handle("/api/", api.NewHandler(dataDir))
