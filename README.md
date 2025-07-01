@@ -23,6 +23,7 @@ What works now:
 - Local session workspace creation with a dedicated `SQLite3` database
 - File upload for `.csv`, `.xlsx`, and `.xls`
 - Real CSV import into SQLite tables
+- Minimal real XLSX import into SQLite tables
 - Import task lifecycle tracking in both JSON files and SQLite
 - Schema catalog persistence in both JSON files and SQLite
 - Query API with basic modes:
@@ -30,13 +31,16 @@ What works now:
   - aggregate
   - top-n
   - trend by month
+  - count
 - Database inspection API for SQLite tables, imported schema catalog, and import task diagnostics
 - Local container build and local compose startup files
 
 Current limitation:
 
 - `.csv` has real row import into SQLite
-- `.xlsx` and `.xls` currently use placeholder schema/table scaffolding and are not fully parsed yet
+- `.xlsx` has minimal real import support for the first sheet
+- invalid `.xlsx` files fall back to placeholder schema scaffolding
+- `.xls` currently uses placeholder schema/table scaffolding and is not fully parsed yet
 
 ## Quick Start
 
@@ -94,6 +98,8 @@ Current behavior:
   - `sql`
   - `rows`
   - `columns`
+  - `row_count`
+  - `executed`
   - `summary`
   - `query_plan`
   - `visualization`
@@ -105,6 +111,16 @@ Current query modes:
 - `aggregate`
 - `topn`
 - `trend`
+- `count`
+
+Current visualization metadata:
+
+- `type`
+- `x`
+- `y`
+- `series`
+- `preferred_format`
+- `source_table`
 
 ## Service Scope
 
@@ -239,6 +255,10 @@ Example response:
   "session_id": "sess_123",
   "status": "active",
   "database_path": "./data/sessions/sess_123/session.db",
+  "uploaded_file_count": 0,
+  "table_count": 0,
+  "import_task_count": 0,
+  "total_row_count": 0,
   "expires_at": "2026-03-29T09:00:00Z"
 }
 ```
@@ -279,7 +299,14 @@ Example response:
   "session_id": "sess_123",
   "task_id": "import_123",
   "status": "pending",
-  "session_status": "importing"
+  "session_status": "importing",
+  "files": [
+    {
+      "name": "sales.csv",
+      "extension": ".csv",
+      "size": 12345
+    }
+  ]
 }
 ```
 
@@ -295,6 +322,8 @@ Example response:
   "task_id": "import_123",
   "status": "completed",
   "session_status": "ready",
+  "warning_count": 0,
+  "duration_ms": 120,
   "tables": ["sales_2025", "customer_list"]
 }
 ```
@@ -318,10 +347,14 @@ Example response:
   "session_id": "sess_123",
   "sql": "SELECT product_name, SUM(revenue) AS total_revenue ...",
   "rows": [],
+  "row_count": 0,
+  "executed": true,
   "visualization": {
     "type": "bar",
     "x": "product_name",
-    "y": "total_revenue"
+    "y": "total_revenue",
+    "series": ["total_revenue"],
+    "preferred_format": "chart"
   }
 }
 ```
