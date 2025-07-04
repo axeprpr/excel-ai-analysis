@@ -63,6 +63,7 @@ func newServer(addr, dataDir string) *http.Server {
 			"routes": []string{
 				"GET /",
 				"GET /healthz",
+				"GET /readyz",
 				"GET /api/sessions",
 				"POST /api/sessions",
 				"GET /api/sessions/:session_id",

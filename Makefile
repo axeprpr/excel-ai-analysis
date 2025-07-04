@@ -1,4 +1,4 @@
-.PHONY: test build run docker-build up smoke
+.PHONY: test build run docker-build up smoke ready
 
 test:
 	go test ./...
@@ -17,3 +17,6 @@ up:
 
 smoke:
 	bash ./scripts/smoke.sh
+
+ready:
+	curl -fsS http://127.0.0.1:8080/readyz
