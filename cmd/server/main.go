@@ -53,6 +53,11 @@ func newServer(addr, dataDir string) *http.Server {
 			"service": "excel-ai-analysis",
 			"status":  "ok",
 			"version": "dev",
+			"config": map[string]any{
+				"addr":                addr,
+				"data_dir":            dataDir,
+				"max_request_body_mb": 256,
+			},
 			"capabilities": []string{
 				"session-isolated sqlite databases",
 				"multi-file spreadsheet uploads",

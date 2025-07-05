@@ -32,6 +32,13 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	if !ok || len(capabilities) == 0 {
 		t.Fatalf("expected capabilities in root response")
 	}
+	config, ok := rootResp["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected config in root response")
+	}
+	if config["max_request_body_mb"] != float64(256) {
+		t.Fatalf("unexpected max_request_body_mb value: %v", config["max_request_body_mb"])
+	}
 	routes, ok := rootResp["routes"].([]any)
 	if !ok || len(routes) < 6 {
 		t.Fatalf("expected expanded route list in root response")
