@@ -56,11 +56,12 @@ func (h *Handler) handleSessionFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
-		"status":     meta.Status,
-		"files":      files,
-		"file_count": len(files),
-		"total_size": totalFileSize(files),
+		"session_id":       sessionID,
+		"status":           meta.Status,
+		"files":            files,
+		"file_count":       len(files),
+		"total_size":       totalFileSize(files),
+		"extension_counts": fileExtensionCounts(files),
 	})
 }
 
@@ -107,4 +108,12 @@ func totalFileSize(files []sessionFile) int64 {
 		total += file.Size
 	}
 	return total
+}
+
+func fileExtensionCounts(files []sessionFile) map[string]int {
+	counts := make(map[string]int)
+	for _, file := range files {
+		counts[file.Extension]++
+	}
+	return counts
 }

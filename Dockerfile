@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/excel-ai-analysis ./c
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates sqlite3 \
+  && apt-get install -y --no-install-recommends ca-certificates curl sqlite3 \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -24,5 +24,8 @@ ENV DATA_DIR=/app/data
 RUN mkdir -p /app/data
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["curl", "-fsS", "http://127.0.0.1:8080/readyz"]
 
 CMD ["excel-ai-analysis"]

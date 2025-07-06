@@ -791,6 +791,13 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	if filesResp["total_size"] == nil {
 		t.Fatalf("expected total_size in files response")
 	}
+	extensionCounts, ok := filesResp["extension_counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected extension_counts in files response")
+	}
+	if extensionCounts[".csv"] != float64(1) {
+		t.Fatalf("expected .csv extension count to be 1, got %v", extensionCounts[".csv"])
+	}
 
 	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
 	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
