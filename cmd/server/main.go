@@ -15,6 +15,7 @@ import (
 type healthResponse struct {
 	Service string `json:"service"`
 	Status  string `json:"status"`
+	Version string `json:"version"`
 }
 
 func main() {
@@ -28,7 +29,12 @@ func main() {
 		dataDir = "data"
 	}
 
-	server := newServer(addr, dataDir)
+	version := os.Getenv("APP_VERSION")
+	if version == "" {
+		version = "dev"
+	}
+
+	server := newServer(addr, dataDir, version)
 
 	log.Printf("server listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil {
@@ -36,7 +42,7 @@ func main() {
 	}
 }
 
-func newServer(addr, dataDir string) *http.Server {
+func newServer(addr, dataDir, version string) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -52,7 +58,7 @@ func newServer(addr, dataDir string) *http.Server {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"service": "excel-ai-analysis",
 			"status":  "ok",
-			"version": "dev",
+			"version": version,
 			"config": map[string]any{
 				"addr":                addr,
 				"data_dir":            dataDir,
@@ -92,6 +98,7 @@ func newServer(addr, dataDir string) *http.Server {
 		_ = json.NewEncoder(w).Encode(healthResponse{
 			Service: "excel-ai-analysis",
 			Status:  "ok",
+			Version: version,
 		})
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +134,7 @@ func newServer(addr, dataDir string) *http.Server {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"service": "excel-ai-analysis",
 			"status":  status,
+			"version": version,
 			"checks":  checks,
 		})
 	})

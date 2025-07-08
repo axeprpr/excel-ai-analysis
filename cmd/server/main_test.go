@@ -8,7 +8,7 @@ import (
 )
 
 func TestRootAndHealthRoutes(t *testing.T) {
-	server := newServer(":0", t.TempDir())
+	server := newServer(":0", t.TempDir(), "test-version")
 
 	rootReq := httptest.NewRequest(http.MethodGet, "/", nil)
 	rootRec := httptest.NewRecorder()
@@ -25,7 +25,7 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	if rootResp["service"] != "excel-ai-analysis" {
 		t.Fatalf("unexpected service value: %v", rootResp["service"])
 	}
-	if rootResp["version"] != "dev" {
+	if rootResp["version"] != "test-version" {
 		t.Fatalf("unexpected version value: %v", rootResp["version"])
 	}
 	capabilities, ok := rootResp["capabilities"].([]any)
@@ -51,6 +51,13 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	if healthRec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, healthRec.Code)
 	}
+	var healthResp map[string]any
+	if err := json.Unmarshal(healthRec.Body.Bytes(), &healthResp); err != nil {
+		t.Fatalf("failed to decode health response: %v", err)
+	}
+	if healthResp["version"] != "test-version" {
+		t.Fatalf("unexpected health version: %v", healthResp["version"])
+	}
 
 	readyReq := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	readyRec := httptest.NewRecorder()
@@ -66,5 +73,8 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	}
 	if readyResp["status"] != "ok" {
 		t.Fatalf("unexpected ready status: %v", readyResp["status"])
+	}
+	if readyResp["version"] != "test-version" {
+		t.Fatalf("unexpected ready version: %v", readyResp["version"])
 	}
 }
