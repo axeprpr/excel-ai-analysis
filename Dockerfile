@@ -20,6 +20,7 @@ COPY --from=builder /out/excel-ai-analysis /usr/local/bin/excel-ai-analysis
 
 ENV ADDR=:8080
 ENV DATA_DIR=/app/data
+ENV APP_VERSION=docker-local
 
 RUN mkdir -p /app/data
 
