@@ -62,6 +62,7 @@ func (h *Handler) handleSessionFiles(w http.ResponseWriter, r *http.Request) {
 		"file_count":       len(files),
 		"total_size":       totalFileSize(files),
 		"extension_counts": fileExtensionCounts(files),
+		"latest_file":      latestSessionFile(files),
 	})
 }
 
@@ -116,4 +117,11 @@ func fileExtensionCounts(files []sessionFile) map[string]int {
 		counts[file.Extension]++
 	}
 	return counts
+}
+
+func latestSessionFile(files []sessionFile) any {
+	if len(files) == 0 {
+		return nil
+	}
+	return files[0]
 }
