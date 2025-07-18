@@ -15,6 +15,9 @@ func NewHandler(dataDir string) http.Handler {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.URL.Path == "/api/status":
+		h.handleStatus(w, r)
+		return
 	case r.URL.Path == "/api/sessions":
 		h.handleSessionsRoot(w, r)
 		return

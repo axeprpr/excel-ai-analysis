@@ -21,6 +21,21 @@ func TestCreateAndListSessions(t *testing.T) {
 	dataDir := t.TempDir()
 	handler := NewHandler(dataDir)
 
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, statusRec.Code)
+	}
+
+	var initialStatus map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &initialStatus); err != nil {
+		t.Fatalf("failed to decode initial status response: %v", err)
+	}
+	if initialStatus["session_count"] != float64(0) {
+		t.Fatalf("expected empty status session_count to be 0, got %v", initialStatus["session_count"])
+	}
+
 	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
@@ -85,6 +100,21 @@ func TestCreateAndListSessions(t *testing.T) {
 	}
 	if listed.Sessions[0]["total_row_count"] != float64(0) {
 		t.Fatalf("expected total_row_count to be 0, got %v", listed.Sessions[0]["total_row_count"])
+	}
+
+	statusReq = httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	statusRec = httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, statusRec.Code)
+	}
+
+	var updatedStatus map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &updatedStatus); err != nil {
+		t.Fatalf("failed to decode updated status response: %v", err)
+	}
+	if updatedStatus["session_count"] != float64(1) {
+		t.Fatalf("expected session_count to be 1, got %v", updatedStatus["session_count"])
 	}
 }
 
