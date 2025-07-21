@@ -31,6 +31,7 @@ The repository currently provides a runnable single-container service with:
 - Database inspection endpoint
 - Query endpoint with chart-oriented metadata
 - Root, health, and readiness endpoints
+- Global API status summary endpoint
 
 ## Known Functional Limits
 

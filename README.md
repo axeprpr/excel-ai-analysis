@@ -74,6 +74,8 @@ Implemented endpoints:
 
 - `GET /`
 - `GET /healthz`
+- `GET /readyz`
+- `GET /api/status`
 - `GET /api/sessions`
 - `POST /api/sessions`
 - `GET /api/sessions/:session_id`
@@ -85,6 +87,14 @@ Implemented endpoints:
 - `GET /api/sessions/:session_id/schema`
 - `GET /api/sessions/:session_id/database`
 - `POST /api/sessions/:session_id/query`
+
+Current endpoint summary highlights:
+
+- `GET /api/status` returns global summary counts across local sessions
+- `GET /api/sessions` and `GET /api/sessions/:session_id` return session-level summary counters
+- `GET /api/sessions/:session_id/files` returns file totals, extension counts, and latest file metadata
+- `GET /api/sessions/:session_id/imports` returns task list plus aggregate task stats
+- `GET /api/sessions/:session_id/database` returns SQLite diagnostics, preview rows, and aggregate counts
 
 ## Current Query Behavior
 

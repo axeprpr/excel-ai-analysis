@@ -75,6 +75,7 @@ func newServer(addr, dataDir, version string) *http.Server {
 				"GET /",
 				"GET /healthz",
 				"GET /readyz",
+				"GET /api/status",
 				"GET /api/sessions",
 				"POST /api/sessions",
 				"GET /api/sessions/:session_id",
