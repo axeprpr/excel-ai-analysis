@@ -118,6 +118,60 @@ func TestCreateAndListSessions(t *testing.T) {
 	}
 }
 
+func TestModelSettingsCRUD(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/model", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, getRec.Code)
+	}
+
+	var defaults map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &defaults); err != nil {
+		t.Fatalf("failed to decode default settings response: %v", err)
+	}
+	if defaults["default_chart_mode"] != "data" {
+		t.Fatalf("expected default chart mode to be data, got %v", defaults["default_chart_mode"])
+	}
+
+	body := bytes.NewBufferString(`{
+		"provider":"openai",
+		"model":"gpt-5.1",
+		"base_url":"https://api.openai.com/v1",
+		"api_key":"test-key",
+		"default_chart_mode":"mermaid",
+		"mcp_server_url":"http://127.0.0.1:1122/mcp"
+	}`)
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/model", body)
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	handler.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, putRec.Code)
+	}
+
+	getReq = httptest.NewRequest(http.MethodGet, "/api/settings/model", nil)
+	getRec = httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, getRec.Code)
+	}
+
+	var saved map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &saved); err != nil {
+		t.Fatalf("failed to decode saved settings response: %v", err)
+	}
+	if saved["provider"] != "openai" {
+		t.Fatalf("expected provider to be openai, got %v", saved["provider"])
+	}
+	if saved["default_chart_mode"] != "mermaid" {
+		t.Fatalf("expected default_chart_mode to be mermaid, got %v", saved["default_chart_mode"])
+	}
+}
+
 func TestUploadRejectsUnsupportedFileType(t *testing.T) {
 	dataDir := t.TempDir()
 	handler := NewHandler(dataDir)
