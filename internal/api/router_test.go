@@ -608,6 +608,9 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 	if queryResp["executed"] == nil {
 		t.Fatalf("expected executed flag in query response")
 	}
+	if queryResp["chart_mode"] != "data" {
+		t.Fatalf("expected default chart_mode to be data, got %v", queryResp["chart_mode"])
+	}
 
 	visualization, ok := queryResp["visualization"].(map[string]any)
 	if !ok {
@@ -626,6 +629,13 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 	series, ok := visualization["series"].([]any)
 	if !ok || len(series) == 0 {
 		t.Fatalf("expected visualization series in query response")
+	}
+	chart, ok := queryResp["chart"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected chart object in query response")
+	}
+	if chart["mode"] != "data" {
+		t.Fatalf("expected chart mode to be data, got %v", chart["mode"])
 	}
 
 	queryPlan, ok := queryResp["query_plan"].(map[string]any)
@@ -1047,6 +1057,52 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	trendColumns, ok := trendResp["columns"].([]any)
 	if !ok || len(trendColumns) != 2 {
 		t.Fatalf("expected 2 ordered columns for trend query, got %v", trendResp["columns"])
+	}
+
+	mermaidBody := bytes.NewBufferString(`{"question":"Show the sales trend by month","chart_mode":"mermaid"}`)
+	mermaidReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", mermaidBody)
+	mermaidReq.Header.Set("Content-Type", "application/json")
+	mermaidRec := httptest.NewRecorder()
+	handler.ServeHTTP(mermaidRec, mermaidReq)
+	if mermaidRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, mermaidRec.Code)
+	}
+
+	var mermaidResp map[string]any
+	if err := json.Unmarshal(mermaidRec.Body.Bytes(), &mermaidResp); err != nil {
+		t.Fatalf("failed to decode mermaid query response: %v", err)
+	}
+	if mermaidResp["chart_mode"] != "mermaid" {
+		t.Fatalf("expected mermaid chart_mode, got %v", mermaidResp["chart_mode"])
+	}
+	mermaidChart, ok := mermaidResp["chart"].(map[string]any)
+	if !ok || mermaidChart["mode"] != "mermaid" {
+		t.Fatalf("expected mermaid chart object, got %v", mermaidResp["chart"])
+	}
+	mermaidContent, _ := mermaidChart["content"].(string)
+	if !strings.Contains(mermaidContent, "xychart-beta") {
+		t.Fatalf("expected mermaid content to contain xychart-beta, got %q", mermaidContent)
+	}
+
+	mcpBody := bytes.NewBufferString(`{"question":"What are the top categories by sales?","chart_mode":"mcp"}`)
+	mcpReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", mcpBody)
+	mcpReq.Header.Set("Content-Type", "application/json")
+	mcpRec := httptest.NewRecorder()
+	handler.ServeHTTP(mcpRec, mcpReq)
+	if mcpRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, mcpRec.Code)
+	}
+
+	var mcpResp map[string]any
+	if err := json.Unmarshal(mcpRec.Body.Bytes(), &mcpResp); err != nil {
+		t.Fatalf("failed to decode mcp query response: %v", err)
+	}
+	mcpChart, ok := mcpResp["chart"].(map[string]any)
+	if !ok || mcpChart["mode"] != "mcp" {
+		t.Fatalf("expected mcp chart object, got %v", mcpResp["chart"])
+	}
+	if mcpChart["endpoint"] == "" {
+		t.Fatalf("expected mcp endpoint in chart object")
 	}
 
 	dbReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/database", nil)

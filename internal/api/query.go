@@ -4,18 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
+	"strconv"
 	"time"
 )
 
 type queryRequest struct {
-	Question string `json:"question"`
+	Question  string `json:"question"`
+	ChartMode string `json:"chart_mode"`
 }
 
 type schemaSnapshot struct {
@@ -71,6 +73,18 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "question is required", http.StatusBadRequest)
 		return
 	}
+	settings, err := h.readModelSettings()
+	if err != nil {
+		http.Error(w, "failed to read model settings", http.StatusInternalServerError)
+		return
+	}
+	chartMode := normalizeChartMode(req.ChartMode)
+	if chartMode == "" {
+		chartMode = normalizeChartMode(settings.DefaultChartMode)
+	}
+	if chartMode == "" {
+		chartMode = "data"
+	}
 
 	snapshot, err := loadSchemaForQuery(sessionDir, meta.DatabasePath)
 	if err != nil {
@@ -97,6 +111,16 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		columns = buildQueryColumns(snapshot)
 		executed = false
 	}
+	visualization := map[string]any{
+		"type":             suggestVisualization(req.Question),
+		"title":            req.Question,
+		"x":                pickVisualizationX(snapshot),
+		"y":                pickVisualizationY(snapshot),
+		"series":           pickVisualizationSeries(plan, snapshot),
+		"preferred_format": preferredVisualizationFormat(plan),
+		"source_table":     plan.SourceTable,
+		"tables":           meta.Tables,
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
@@ -106,18 +130,11 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		"columns":    columns,
 		"row_count":  len(rows),
 		"executed":   executed,
+		"chart_mode": chartMode,
 		"summary":    buildQuerySummary(plan, executed, len(rows)),
 		"query_plan": plan,
-		"visualization": map[string]any{
-			"type":             suggestVisualization(req.Question),
-			"title":            req.Question,
-			"x":                pickVisualizationX(snapshot),
-			"y":                pickVisualizationY(snapshot),
-			"series":           pickVisualizationSeries(plan, snapshot),
-			"preferred_format": preferredVisualizationFormat(plan),
-			"source_table":     plan.SourceTable,
-			"tables":           meta.Tables,
-		},
+		"visualization": visualization,
+		"chart":         buildChartOutput(chartMode, settings, plan, visualization, columns, rows),
 		"warnings": queryWarnings(plan, executed),
 	})
 }
@@ -541,4 +558,109 @@ func preferredVisualizationFormat(plan queryPlan) string {
 	default:
 		return "table"
 	}
+}
+
+func buildChartOutput(chartMode string, settings modelSettings, plan queryPlan, visualization map[string]any, columns []string, rows []map[string]any) map[string]any {
+	switch chartMode {
+	case "mermaid":
+		return map[string]any{
+			"mode":    "mermaid",
+			"syntax":  "mermaid",
+			"content": buildMermaidChart(visualization, columns, rows),
+		}
+	case "mcp":
+		return map[string]any{
+			"mode":        "mcp",
+			"deployment":  "@antv/mcp-server-chart",
+			"endpoint":    settings.MCPServerURL,
+			"tool":        "render_chart",
+			"payload": map[string]any{
+				"title":         visualization["title"],
+				"visualization": visualization,
+				"columns":       columns,
+				"rows":          rows,
+				"query_plan":    plan,
+			},
+		}
+	default:
+		return map[string]any{
+			"mode":          "data",
+			"columns":       columns,
+			"rows":          rows,
+			"visualization": visualization,
+		}
+	}
+}
+
+func buildMermaidChart(visualization map[string]any, columns []string, rows []map[string]any) string {
+	chartType, _ := visualization["type"].(string)
+	title, _ := visualization["title"].(string)
+	x, _ := visualization["x"].(string)
+	y, _ := visualization["y"].(string)
+
+	if len(rows) == 0 {
+		return "%% no chart data"
+	}
+
+	if chartType == "pie" && len(rows) > 0 {
+		var b strings.Builder
+		b.WriteString("pie showData\n")
+		b.WriteString("    title " + title + "\n")
+		labelKey := x
+		valueKey := y
+		for _, row := range rows {
+			label := fmt.Sprint(row[labelKey])
+			value := asChartNumber(row[valueKey])
+			b.WriteString(fmt.Sprintf("    %q : %v\n", label, value))
+		}
+		return b.String()
+	}
+
+	labels := make([]string, 0, len(rows))
+	values := make([]string, 0, len(rows))
+	for _, row := range rows {
+		labels = append(labels, fmt.Sprintf("%q", fmt.Sprint(row[x])))
+		values = append(values, fmt.Sprintf("%v", asChartNumber(row[y])))
+	}
+
+	return "xychart-beta\n" +
+		"    title " + fmt.Sprintf("%q", title) + "\n" +
+		"    x-axis [" + strings.Join(labels, ", ") + "]\n" +
+		"    y-axis " + fmt.Sprintf("%q", y) + " 0 --> " + fmt.Sprintf("%v", maxChartValue(rows, y)) + "\n" +
+		"    bar [" + strings.Join(values, ", ") + "]"
+}
+
+func asChartNumber(value any) float64 {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case json.Number:
+		f, _ := v.Float64()
+		return f
+	case string:
+		f, _ := strconv.ParseFloat(v, 64)
+		return f
+	default:
+		return 0
+	}
+}
+
+func maxChartValue(rows []map[string]any, key string) float64 {
+	max := 0.0
+	for _, row := range rows {
+		value := asChartNumber(row[key])
+		if value > max {
+			max = value
+		}
+	}
+	if max <= 0 {
+		return 1
+	}
+	return max
 }
