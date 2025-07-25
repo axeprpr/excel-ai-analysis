@@ -77,4 +77,11 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	if readyResp["version"] != "test-version" {
 		t.Fatalf("unexpected ready version: %v", readyResp["version"])
 	}
+
+	consoleReq := httptest.NewRequest(http.MethodGet, "/console", nil)
+	consoleRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(consoleRec, consoleReq)
+	if consoleRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, consoleRec.Code)
+	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/axeprpr/excel-ai-analysis/internal/api"
 )
+
+//go:embed web/console.html
+var consoleHTML embed.FS
 
 type healthResponse struct {
 	Service string `json:"service"`
@@ -88,6 +92,19 @@ func newServer(addr, dataDir, version string) *http.Server {
 				"POST /api/sessions/:session_id/query",
 			},
 		})
+	})
+	mux.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		content, err := consoleHTML.ReadFile("web/console.html")
+		if err != nil {
+			http.Error(w, "failed to load console", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(content)
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
