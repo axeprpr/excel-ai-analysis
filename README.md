@@ -34,6 +34,7 @@ What works now:
   - count
 - Database inspection API for SQLite tables, imported schema catalog, and import task diagnostics
 - Local container build and local compose startup files
+- Local `@antv/mcp-server-chart` sidecar deployment via Compose
 
 Current limitation:
 
@@ -95,6 +96,7 @@ Current endpoint summary highlights:
 - `GET /api/sessions/:session_id/files` returns file totals, extension counts, and latest file metadata
 - `GET /api/sessions/:session_id/imports` returns task list plus aggregate task stats
 - `GET /api/sessions/:session_id/database` returns SQLite diagnostics, preview rows, and aggregate counts
+- `GET /api/settings/model` and `PUT /api/settings/model` manage local model and MCP endpoint settings
 
 ## Current Query Behavior
 
@@ -135,6 +137,11 @@ Current visualization metadata:
 ## Service Scope
 
 This repository is intended to run as a single independent container.
+
+For chart MCP integration, the default local development setup uses a second local sidecar service in `compose.yaml`:
+
+- `excel-ai-analysis`
+- `chart-mcp`
 
 The container will provide:
 
