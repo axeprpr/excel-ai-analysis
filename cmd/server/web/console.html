@@ -363,10 +363,26 @@
         const res = await fetch(`/api/sessions/${state.currentSessionId}/files/upload`, { method: "POST", body: form });
         const body = await res.json();
         if (!res.ok) throw new Error(JSON.stringify(body));
-        setStatus(`上传成功，任务 ${body.task_id}`);
+        setStatus(`上传成功，任务 ${body.task_id}，等待导入完成...`);
+        await waitForImportTask(body.task_id);
         await loadSessions();
         await selectSession(state.currentSessionId);
         await loadGlobalStatus();
+      }
+
+      async function waitForImportTask(taskId) {
+        for (let i = 0; i < 60; i++) {
+          const task = await api(`/api/sessions/${state.currentSessionId}/imports/${taskId}`);
+          if (task.status === "completed") {
+            setStatus(`导入完成，任务 ${taskId}`);
+            return;
+          }
+          if (task.status === "failed") {
+            throw new Error(task.error || "导入失败");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        throw new Error("导入等待超时");
       }
 
       async function askQuestion() {
