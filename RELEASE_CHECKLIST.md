@@ -32,6 +32,7 @@ The repository currently provides a runnable single-container service with:
 - Query endpoint with chart-oriented metadata
 - Root, health, and readiness endpoints
 - Global API status summary endpoint
+- Browser console and local model settings endpoint
 
 ## Known Functional Limits
 

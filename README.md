@@ -74,8 +74,11 @@ make up
 Implemented endpoints:
 
 - `GET /`
+- `GET /console`
 - `GET /healthz`
 - `GET /readyz`
+- `GET /api/settings/model`
+- `PUT /api/settings/model`
 - `GET /api/status`
 - `GET /api/sessions`
 - `POST /api/sessions`
@@ -92,10 +95,12 @@ Implemented endpoints:
 Current endpoint summary highlights:
 
 - `GET /api/status` returns global summary counts across local sessions
+- `GET /console` serves a minimal browser console for config, upload, and chat
 - `GET /api/sessions` and `GET /api/sessions/:session_id` return session-level summary counters
 - `GET /api/sessions/:session_id/files` returns file totals, extension counts, and latest file metadata
 - `GET /api/sessions/:session_id/imports` returns task list plus aggregate task stats
 - `GET /api/sessions/:session_id/database` returns SQLite diagnostics, preview rows, and aggregate counts
+- `GET/PUT /api/settings/model` stores local model and MCP settings
 - `GET /api/settings/model` and `PUT /api/settings/model` manage local model and MCP endpoint settings
 
 ## Current Query Behavior
@@ -133,6 +138,12 @@ Current visualization metadata:
 - `series`
 - `preferred_format`
 - `source_table`
+
+Current chart output modes:
+
+- `data`
+- `mermaid`
+- `mcp`
 
 ## Service Scope
 
