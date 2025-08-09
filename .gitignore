@@ -2,6 +2,8 @@ data/
 tmp/
 bin/
 dist/
+frontend/node_modules/
+frontend/dist/
 *.db
 *.log
 *.out
