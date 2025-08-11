@@ -21,6 +21,8 @@ services:
     depends_on:
       chart-mcp:
         condition: service_started
+      frontend:
+        condition: service_started
 
   chart-mcp:
     image: node:20-bookworm
@@ -28,3 +30,12 @@ services:
     command: ["npx", "-y", "@antv/mcp-server-chart", "--transport", "streamable", "--host", "0.0.0.0", "--port", "1122"]
     ports:
       - "1122:1122"
+
+  frontend:
+    image: node:20-bookworm
+    working_dir: /app
+    command: ["bash", "-lc", "npm install && npm run dev -- --host 0.0.0.0 --port 4173"]
+    ports:
+      - "4173:4173"
+    volumes:
+      - ./frontend:/app

@@ -153,6 +153,7 @@ For chart MCP integration, the default local development setup uses a second loc
 
 - `excel-ai-analysis`
 - `chart-mcp`
+- `frontend`
 
 The container will provide:
 
