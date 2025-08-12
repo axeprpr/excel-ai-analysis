@@ -35,6 +35,8 @@ services:
     image: node:20-bookworm
     working_dir: /app
     command: ["bash", "-lc", "npm install && npm run dev -- --host 0.0.0.0 --port 4173"]
+    environment:
+      VITE_API_PROXY_TARGET: http://excel-ai-analysis:8080
     ports:
       - "4173:4173"
     volumes:
