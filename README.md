@@ -35,6 +35,11 @@ What works now:
 - Database inspection API for SQLite tables, imported schema catalog, and import task diagnostics
 - Local container build and local compose startup files
 - Local `@antv/mcp-server-chart` sidecar deployment via Compose
+- `shadcn/ui` chat frontend in `frontend/`
+- Inline chat rendering for:
+  - table/data chart cards
+  - Mermaid charts rendered in-browser
+  - MCP chart payload blocks for local sidecar handoff
 
 Current limitation:
 
@@ -69,6 +74,12 @@ make smoke
 make up
 ```
 
+After startup:
+
+- backend API: `http://127.0.0.1:8080`
+- chat frontend: `http://127.0.0.1:4173`
+- local chart MCP sidecar: `http://127.0.0.1:1122/mcp`
+
 ## Current API Surface
 
 Implemented endpoints:
@@ -95,7 +106,7 @@ Implemented endpoints:
 Current endpoint summary highlights:
 
 - `GET /api/status` returns global summary counts across local sessions
-- `GET /console` serves a minimal browser console for config, upload, and chat
+- `GET /console` still serves the legacy minimal console, but the primary UI now lives in the `frontend/` app
 - `GET /api/sessions` and `GET /api/sessions/:session_id` return session-level summary counters
 - `GET /api/sessions/:session_id/files` returns file totals, extension counts, and latest file metadata
 - `GET /api/sessions/:session_id/imports` returns task list plus aggregate task stats
@@ -145,6 +156,12 @@ Current chart output modes:
 - `mermaid`
 - `mcp`
 
+In the current frontend:
+
+- `data` mode renders inline data cards for quick chart-style reading
+- `mermaid` mode renders SVG diagrams directly inside assistant chat messages
+- `mcp` mode shows the local chart sidecar target and payload used for downstream chart rendering
+
 ## Service Scope
 
 This repository is intended to run as a single independent container.
@@ -154,6 +171,8 @@ For chart MCP integration, the default local development setup uses a second loc
 - `excel-ai-analysis`
 - `chart-mcp`
 - `frontend`
+
+The `frontend` service runs a Vite + React + `shadcn/ui` chat workspace and proxies `/api`, `/healthz`, and `/readyz` to the Go backend.
 
 The container will provide:
 
