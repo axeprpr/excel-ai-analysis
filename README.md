@@ -1,65 +1,166 @@
 # Excel AI Analysis
 
-`excel-ai-analysis` is a standalone container service that turns uploaded Excel files into a local AI-queryable data workspace.
+`excel-ai-analysis` is a standalone local analytics service for Excel-style question answering.
 
-## Goal
+It is built around one core idea:
 
-Provide an API service for Excel question answering:
+- upload spreadsheet files into an isolated session
+- import them into a session-local `SQLite` database
+- ask natural-language questions
+- return text, SQL, table data, and chart-ready output
 
-- Upload one or more Excel files.
-- Support large files, including files with around 100,000 rows each.
-- Parse Excel content and use AI to infer schema and table structure.
-- Store structured data in local `SQLite3`.
-- Support text-to-SQL querying for natural-language question answering.
-- Return query results in a format that can be rendered as charts or tables.
+The repository already contains a runnable V1 baseline with backend APIs, a `shadcn/ui` chat frontend, local session storage, and local chart integration scaffolding.
 
-## Current Status
+## What It Does
 
-The repository already contains a runnable first implementation.
+Current end-to-end flow:
 
-What works now:
+1. Create or auto-create a session
+2. Upload one or more spreadsheet files
+3. Import files into the session's own local `SQLite` database
+4. Build schema metadata for the imported tables
+5. Ask a natural-language question
+6. Execute a heuristic text-to-SQL flow against the session database
+7. Return:
+   - summary text
+   - generated SQL
+   - table rows
+   - visualization metadata
+   - chart output in `data`, `mermaid`, or `mcp` mode
 
-- Session creation, listing, inspection, and deletion
-- Local session workspace creation with a dedicated `SQLite3` database
-- File upload for `.csv`, `.xlsx`, and `.xls`
-- Real CSV import into SQLite tables
-- Minimal real XLSX import into SQLite tables
-- Import task lifecycle tracking in both JSON files and SQLite
-- Schema catalog persistence in both JSON files and SQLite
-- Query API with basic modes:
-  - detail
-  - aggregate
-  - top-n
-  - trend by month
-  - count
-- Database inspection API for SQLite tables, imported schema catalog, and import task diagnostics
-- Local container build and local compose startup files
-- Local `@antv/mcp-server-chart` sidecar deployment via Compose
-- `shadcn/ui` chat frontend in `frontend/`
-- Inline chat rendering for:
-  - table/data chart cards
-  - Mermaid charts rendered in-browser
-  - MCP chart payload blocks for local sidecar handoff
+This service is intended to work well both as:
 
-Current limitation:
+- a direct local service with its own chat UI
+- an upstream tool for systems such as Dify
 
-- `.csv` has real row import into SQLite
-- `.xlsx` has minimal real import support for the first sheet
+## Current Implementation Status
+
+Implemented today:
+
+- session lifecycle APIs
+- one local `SQLite` database per session
+- local file upload and import task tracking
+- real `.csv` import into SQLite
+- minimal real `.xlsx` import into SQLite
+- placeholder `.xls` handling with explicit warnings
+- schema catalog persistence in:
+  - JSON files
+  - SQLite catalog tables
+- query execution against imported SQLite data when possible
+- fallback placeholder query responses when true execution is not possible
+- query modes:
+  - `detail`
+  - `aggregate`
+  - `topn`
+  - `trend`
+  - `count`
+- chart output modes:
+  - `data`
+  - `mermaid`
+  - `mcp`
+- local `@antv/mcp-server-chart` sidecar deployment via Compose
+- `shadcn/ui` frontend in `frontend/`
+- chat-style UI with inline result rendering
+- readiness, health, smoke, and basic deployment tooling
+
+Current limits:
+
+- `.csv` is the strongest import path
+- `.xlsx` is intentionally minimal, not full workbook coverage
 - invalid `.xlsx` files fall back to placeholder schema scaffolding
-- `.xls` currently uses placeholder schema/table scaffolding and is not fully parsed yet
+- `.xls` is not truly parsed yet
+- AI text-to-SQL is still heuristic and local-rule based
+- MCP chart output currently returns payload and endpoint info for downstream execution; it does not yet execute the chart MCP inside the Go request path
+
+## Architecture
+
+The repository currently runs as a local multi-service stack:
+
+- `excel-ai-analysis`
+  - Go API server
+  - session management
+  - import orchestration
+  - SQLite access
+  - query logic
+- `frontend`
+  - Vite + React + TypeScript
+  - `shadcn/ui` chat-first workspace
+- `chart-mcp`
+  - local `@antv/mcp-server-chart` sidecar
+
+At runtime, the data model is session-first:
+
+- each session gets its own directory
+- each session gets its own `session.db`
+- uploaded files, task metadata, and schema snapshots are stored under that session directory
+
+Suggested mental model:
+
+- `session` = one isolated workbook analysis workspace
+
+## Session Model
+
+Every session owns:
+
+- uploaded files
+- import tasks
+- schema metadata
+- one dedicated local `SQLite` database
+- query history context via the session database and schema state
+
+Typical on-disk layout:
+
+```text
+data/
+  sessions/
+    sess_xxxxxxxx/
+      session.db
+      session.json
+      uploads/
+        sales.csv
+        customers.xlsx
+      imports/
+        import_abcd1234.json
+      schema/
+        tables.json
+```
+
+Current session states:
+
+- `active`
+- `importing`
+- `ready`
+- `expired`
+- `deleted`
+
+Current implementation mostly uses:
+
+- `active`
+- `importing`
+- `ready`
 
 ## Quick Start
 
-### Run locally
+### Run backend locally
 
 ```bash
 make run
 ```
 
+Default backend address:
+
+- `http://127.0.0.1:8080`
+
 ### Run tests
 
 ```bash
 make test
+```
+
+### Build frontend
+
+```bash
+make frontend-build
 ```
 
 ### Smoke check
@@ -68,7 +169,7 @@ make test
 make smoke
 ```
 
-### Run with Docker Compose
+### Run the full local stack
 
 ```bash
 make up
@@ -77,22 +178,79 @@ make up
 After startup:
 
 - backend API: `http://127.0.0.1:8080`
-- chat frontend: `http://127.0.0.1:4173`
+- frontend UI: `http://127.0.0.1:4173`
 - local chart MCP sidecar: `http://127.0.0.1:1122/mcp`
 
-## Current API Surface
+## Runtime Services
 
-Implemented endpoints:
+### Backend
+
+The Go service exposes:
+
+- REST APIs
+- health and readiness probes
+- local session storage
+- local SQLite execution
+
+### Frontend
+
+The main UI is the React app in `frontend/`.
+
+It is built with:
+
+- Vite
+- React
+- TypeScript
+- `shadcn/ui`
+
+The frontend is chat-first:
+
+- left side for session management, uploads, and settings
+- right side for the conversation
+- assistant messages render:
+  - summary
+  - SQL
+  - table rows
+  - chart output
+  - warnings
+
+Chart rendering behavior:
+
+- `data` mode: inline visual card rendering based on returned data
+- `mermaid` mode: Mermaid content rendered directly into SVG in the chat
+- `mcp` mode: MCP payload and endpoint info shown for downstream chart execution
+
+The legacy `GET /console` page still exists, but it is not the primary UI.
+
+### Chart MCP Sidecar
+
+`compose.yaml` includes a local `@antv/mcp-server-chart` service.
+
+Current purpose:
+
+- provide a local chart MCP target
+- allow the backend and frontend to reference a local chart-rendering sidecar
+
+Current implementation status:
+
+- deployed locally
+- exposed to the system
+- referenced by settings and query output
+- not yet fully executed inside the backend query path
+
+## API Overview
+
+Implemented top-level routes:
 
 - `GET /`
 - `GET /console`
 - `GET /healthz`
 - `GET /readyz`
+- `GET /api/status`
 - `GET /api/settings/model`
 - `PUT /api/settings/model`
 - `POST /api/chat/upload`
 - `POST /api/chat/query`
-- `GET /api/status`
 - `GET /api/sessions`
 - `POST /api/sessions`
 - `GET /api/sessions/:session_id`
@@ -105,696 +263,507 @@ Implemented endpoints:
 - `GET /api/sessions/:session_id/database`
 - `POST /api/sessions/:session_id/query`
 
-Current endpoint summary highlights:
+### Discovery And Ops
 
-- `POST /api/chat/upload` is the Dify-friendly entrypoint:
-  - auto-creates a session when `session_id` is omitted
-  - uploads files
-  - runs import synchronously for the request
-  - optionally executes a query immediately when `question` is provided
-- `POST /api/chat/query` is the Dify-friendly follow-up entrypoint:
-  - accepts `session_id`
-  - executes a follow-up question against an existing ready session
-- `GET /api/status` returns global summary counts across local sessions
-- `GET /console` still serves the legacy minimal console, but the primary UI now lives in the `frontend/` app
-- `GET /api/sessions` and `GET /api/sessions/:session_id` return session-level summary counters
-- `GET /api/sessions/:session_id/files` returns file totals, extension counts, and latest file metadata
-- `GET /api/sessions/:session_id/imports` returns task list plus aggregate task stats
-- `GET /api/sessions/:session_id/database` returns SQLite diagnostics, preview rows, and aggregate counts
-- `GET/PUT /api/settings/model` stores local model and MCP settings
-- `GET /api/settings/model` and `PUT /api/settings/model` manage local model and MCP endpoint settings
+- `GET /`
+  - returns service metadata, capabilities, routes, and runtime config
+- `GET /healthz`
+  - basic process health
+- `GET /readyz`
+  - checks local readiness, including SQLite availability and data directory readiness
+- `GET /api/status`
+  - returns global local-node summary counts across sessions
 
-## Current Query Behavior
+### Model Settings
 
-The query layer is still heuristic, but it is no longer just static placeholder output.
+- `GET /api/settings/model`
+- `PUT /api/settings/model`
 
-Current behavior:
+Current stored settings include:
 
-- If a real imported SQLite table is available, the service tries to execute SQL against the local session database.
-- If real execution is not possible, it falls back to placeholder response data.
-- Query responses include:
-  - `sql`
-  - `rows`
-  - `columns`
-  - `row_count`
-  - `executed`
-  - `summary`
-  - `query_plan`
-  - `visualization`
-  - `warnings`
+- `provider`
+- `model`
+- `base_url`
+- `api_key`
+- `default_chart_mode`
+- `mcp_server_url`
 
-Current query modes:
+These settings are stored locally and are currently used as configuration input rather than as a fully wired LLM execution layer.
 
-- `detail`
-- `aggregate`
-- `topn`
-- `trend`
-- `count`
+### Session APIs
 
-Current visualization metadata:
+- `POST /api/sessions`
+  - create a session explicitly
+- `GET /api/sessions`
+  - list sessions with summary counters
+- `GET /api/sessions/:session_id`
+  - inspect one session
+- `DELETE /api/sessions/:session_id`
+  - delete a session and its local files
 
-- `type`
-- `x`
-- `y`
-- `series`
-- `preferred_format`
-- `source_table`
+Session summaries currently include:
 
-Current chart output modes:
+- `uploaded_file_count`
+- `table_count`
+- `import_task_count`
+- `total_row_count`
 
-- `data`
-- `mermaid`
-- `mcp`
+### File APIs
 
-## Dify-Friendly Integration
+- `POST /api/sessions/:session_id/files/upload`
+  - upload files into an existing session
+- `GET /api/sessions/:session_id/files`
+  - inspect uploaded files in a session
 
-For an agent-style integration, Dify does not need to manage the internal session workflow itself.
+File listings currently include:
 
-Recommended pattern:
+- file count
+- total size
+- extension counts
+- latest file metadata
 
-1. First request calls `POST /api/chat/upload`
-2. Omit `session_id` to auto-create a new isolated session
-3. Send one or more files with `multipart/form-data`
-4. Optionally include:
-   - `question`
-   - `chart_mode`
-5. Persist the returned `session_id` in Dify conversation variables
-6. Follow-up requests call `POST /api/chat/query` with that same `session_id`
+### Import APIs
 
-`POST /api/chat/upload` accepts form fields:
+- `GET /api/sessions/:session_id/imports`
+- `GET /api/sessions/:session_id/imports/:task_id`
 
-- `session_id` optional
-- `question` optional
-- `chart_mode` optional
-- one or more uploaded `file` parts
+Import task data currently includes:
 
-`POST /api/chat/query` accepts JSON:
+- `task_id`
+- `status`
+- `file_count`
+- `file_names`
+- `warning_count`
+- `duration_ms`
+- `started_at`
+- `finished_at`
+
+### Schema API
+
+- `GET /api/sessions/:session_id/schema`
+
+The schema response exposes imported table and column structure. It prefers the SQLite schema catalog when available.
+
+### Database Diagnostics API
+
+- `GET /api/sessions/:session_id/database`
+
+Current diagnostics include:
+
+- SQLite table names
+- schema catalog
+- preview rows
+- import tasks
+- aggregate counts such as:
+  - `table_count`
+  - `total_row_count`
+  - `import_task_count`
+
+### Query API
+
+- `POST /api/sessions/:session_id/query`
+
+Request body:
 
 ```json
 {
-  "session_id": "sess_xxx",
   "question": "Show sales by category",
   "chart_mode": "mermaid"
 }
 ```
 
-Both endpoints return structured data intended for agent orchestration:
+Current query response shape includes:
 
 - `session_id`
-- query `summary`
+- `question`
+- `summary`
 - `sql`
 - `rows`
 - `columns`
+- `row_count`
+- `executed`
+- `query_plan`
+- `visualization`
 - `chart`
 - `warnings`
 
-In the current frontend:
+## Dify-Friendly Integration
 
-- `data` mode renders inline data cards for quick chart-style reading
-- `mermaid` mode renders SVG diagrams directly inside assistant chat messages
-- `mcp` mode shows the local chart sidecar target and payload used for downstream chart rendering
+The repository now contains two simplified endpoints specifically aimed at upstream orchestration systems such as Dify.
 
-## Service Scope
+### 1. Upload With Auto Session
 
-This repository is intended to run as a single independent container.
+`POST /api/chat/upload`
 
-For chart MCP integration, the default local development setup uses a second local sidecar service in `compose.yaml`:
+This is the recommended first call for agent-style usage.
 
-- `excel-ai-analysis`
-- `chart-mcp`
-- `frontend`
+Behavior:
 
-The `frontend` service runs a Vite + React + `shadcn/ui` chat workspace and proxies `/api`, `/healthz`, and `/readyz` to the Go backend.
+- accepts `multipart/form-data`
+- if `session_id` is missing, auto-creates a new session
+- uploads one or more files
+- runs import synchronously inside the request
+- if `question` is provided, runs a query immediately after import
 
-The container will provide:
+Accepted form fields:
 
-- Session-based workspace isolation.
-- File upload API for multiple Excel files.
-- Background import pipeline for large Excel parsing.
-- AI-assisted schema generation and table creation.
-- Local `SQLite3` storage for imported datasets.
-- Text-to-SQL API for asking questions in natural language.
-- Data visualization output support based on common chart solutions.
+- `session_id` optional
+- `question` optional
+- `chart_mode` optional
+- one or more `file` fields
 
-## Session Model
+Example behavior:
 
-The core unit of the service is a `session`.
+- first call with files and no `session_id`
+- service returns a fresh `session_id`
+- Dify stores that `session_id` in conversation variables
 
-Each session represents one isolated analysis workspace:
-
-- A session owns its uploaded Excel files.
-- A session owns its own local `SQLite3` database file.
-- A session keeps its own schema context for AI text-to-SQL.
-- Queries, results, and chart metadata are generated within a session.
-
-In other words, each session should have its own local resources instead of sharing one global database:
-
-- A dedicated session directory, for example `./data/sessions/<session_id>/`
-- A dedicated SQLite database, for example `./data/sessions/<session_id>/session.db`
-- Session-specific uploaded source files
-- Session-specific import metadata and generated schema artifacts
-
-This means different users, tasks, or business topics can be separated by session instead of mixing all uploaded data into one global database context.
-
-Typical usage:
-
-1. Create a session.
-2. Upload one or more Excel files into that session.
-3. Wait for the import task to finish.
-4. Ask questions against that session.
-5. Render tables or charts from that session's query results.
-
-## High-Level Flow
-
-1. Client creates a session.
-2. Client uploads one or more Excel files into the session.
-3. Service stores files locally and creates an import task.
-4. Import pipeline reads workbook sheets in chunks.
-5. AI analyzes headers, column semantics, and likely field types.
-6. Service writes data into that session's own local `SQLite3` database.
-7. Excel data is written into SQLite tables.
-8. User sends a natural-language question for that session.
-9. AI generates SQL based on the session schema.
-10. Service executes SQL, returns rows, and optionally returns chart-friendly data.
-
-## Session Storage Layout
-
-Suggested local structure:
-
-```text
-data/
-  sessions/
-    sess_123/
-      session.db
-      uploads/
-        sales.xlsx
-        customers.xlsx
-      imports/
-        import_123.json
-      schema/
-        tables.json
-```
-
-This design keeps each session self-contained and easier to manage for:
-
-- Isolation
-- Cleanup
-- Debugging
-- Re-import
-- Future session export or backup
-
-## Session Lifecycle
-
-A session should have an explicit lifecycle instead of staying forever.
-
-Suggested states:
-
-- `active`: session has been created and can accept uploads and queries
-- `importing`: one or more files are being parsed and written into the session database
-- `ready`: import is complete and the session is ready for question answering
-- `expired`: session has passed its retention window and is no longer queryable
-- `deleted`: session files and database have been removed
-
-Suggested lifecycle rules:
-
-1. A session is created with status `active`.
-2. When files are uploaded and import starts, status becomes `importing`.
-3. After import and schema generation finish, status becomes `ready`.
-4. If the session is idle for too long or passes its retention policy, status becomes `expired`.
-5. Expired sessions can be cleaned automatically or deleted explicitly by API.
-
-Suggested retention strategy for the first version:
-
-- Keep session data on local disk for a limited time
-- Update `last_accessed_at` on upload, import, and query
-- Run a background cleanup job to remove expired session directories
-- Make retention configurable, for example `24h`, `72h`, or `7d`
-
-Minimum session metadata:
-
-- `session_id`
-- `status`
-- `created_at`
-- `updated_at`
-- `last_accessed_at`
-- `expires_at`
-- `database_path`
-- `uploaded_files`
-- `tables`
-
-## Planned API
-
-### 1. Create session
-
-`POST /api/sessions`
-
-Example response:
+Example response shape:
 
 ```json
 {
-  "session_id": "sess_123",
-  "status": "active",
-  "database_path": "./data/sessions/sess_123/session.db",
-  "uploaded_file_count": 0,
-  "table_count": 0,
-  "import_task_count": 0,
-  "total_row_count": 0,
-  "expires_at": "2026-03-29T09:00:00Z"
-}
-```
-
-### 2. Get session
-
-`GET /api/sessions/:session_id`
-
-Example response:
-
-```json
-{
-  "session_id": "sess_123",
-  "status": "ready",
-  "created_at": "2026-03-26T09:00:00Z",
-  "last_accessed_at": "2026-03-26T10:30:00Z",
-  "expires_at": "2026-03-29T09:00:00Z",
-  "database_path": "./data/sessions/sess_123/session.db",
-  "tables": ["sales_2025", "customer_list"]
-}
-```
-
-### 3. Upload Excel files
-
-`POST /api/sessions/:session_id/files/upload`
-
-Expected capability:
-
-- Multipart upload
-- Multiple files per request
-- Large file support
-- Async import task response
-
-Example response:
-
-```json
-{
-  "session_id": "sess_123",
-  "task_id": "import_123",
-  "status": "pending",
-  "session_status": "importing",
+  "session_id": "sess_xxx",
+  "session_created": true,
+  "import": {
+    "task_id": "import_xxx",
+    "status": "completed",
+    "file_count": 1,
+    "file_names": ["sales.csv"],
+    "warning_count": 0,
+    "warnings": []
+  },
   "files": [
     {
       "name": "sales.csv",
       "extension": ".csv",
-      "size": 12345
+      "size": 62
     }
-  ]
-}
-```
-
-### 4. Check import status
-
-`GET /api/sessions/:session_id/imports/:task_id`
-
-Example response:
-
-```json
-{
-  "session_id": "sess_123",
-  "task_id": "import_123",
-  "status": "completed",
-  "session_status": "ready",
-  "warning_count": 0,
-  "duration_ms": 120,
-  "tables": ["sales_2025", "customer_list"]
-}
-```
-
-### 5. Ask questions in natural language
-
-`POST /api/sessions/:session_id/query`
-
-Example request:
-
-```json
-{
-  "question": "What are the top 10 products by revenue this quarter?"
-}
-```
-
-Example response:
-
-```json
-{
-  "session_id": "sess_123",
-  "sql": "SELECT product_name, SUM(revenue) AS total_revenue ...",
-  "rows": [],
-  "row_count": 0,
-  "executed": true,
-  "visualization": {
-    "type": "bar",
-    "x": "product_name",
-    "y": "total_revenue",
-    "series": ["total_revenue"],
-    "preferred_format": "chart"
+  ],
+  "answer": {
+    "session_id": "sess_xxx",
+    "summary": "Query on sales from sales.csv ran in detail mode and executed against SQLite, returning 2 row(s).",
+    "sql": "SELECT category, amount FROM sales LIMIT 100;",
+    "rows": [],
+    "columns": [],
+    "chart_mode": "mermaid",
+    "chart": {},
+    "warnings": []
   }
 }
 ```
 
-### 6. Delete session
+### 2. Follow-Up Query
 
-`DELETE /api/sessions/:session_id`
+`POST /api/chat/query`
 
-Expected behavior:
+This is the recommended follow-up call after Dify has already stored a `session_id`.
 
-- Remove session database
-- Remove uploaded files
-- Remove import metadata and schema artifacts
-- Mark session as deleted or return not found on future access
-
-Example response:
+Request body:
 
 ```json
 {
-  "session_id": "sess_123",
-  "status": "deleted"
+  "session_id": "sess_xxx",
+  "question": "Count rows",
+  "chart_mode": "data"
 }
 ```
 
-## Import And Table-Building Strategy
+Behavior:
 
-Excel import is not just file parsing. The service should convert workbook content into a queryable relational structure that AI can reliably use.
+- reuses an existing session
+- requires the session to already be `ready`
+- runs a follow-up question against that session
 
-### Import principles
+Recommended Dify pattern:
 
-- Process files sheet by sheet
-- Process large sheets in chunks instead of loading everything into memory
-- Preserve the raw source file in the session directory
-- Build stable table names and column names
-- Keep enough metadata so AI can understand what each table represents
+1. first request uses `POST /api/chat/upload`
+2. Dify stores `session_id`
+3. later messages use `POST /api/chat/query`
 
-### Table creation strategy
+This is the easiest integration mode because Dify does not need to manage the lower-level session creation and import workflow itself.
 
-For each uploaded Excel file:
+## Import Behavior
 
-1. Read workbook metadata and enumerate sheets.
-2. Detect the effective header row for each sheet.
-3. Normalize sheet names into SQLite-safe table names.
-4. Normalize column names into SQL-safe field names.
-5. Infer basic field types from sampled and streamed row values.
-6. Ask AI to enrich semantic meaning of columns when needed.
-7. Create SQLite tables in the session database.
-8. Insert sheet rows in batches.
-9. Persist table schema metadata for later text-to-SQL generation.
+Current supported upload extensions:
 
-Suggested table naming:
+- `.csv`
+- `.xlsx`
+- `.xls`
 
-- Use file name + sheet name as the base
-- Normalize to lowercase snake_case
-- Add suffixes only when conflicts happen
+### CSV
 
-Example:
+Current CSV behavior:
 
-- `sales.xlsx` + `Q1 Report` -> `sales_q1_report`
-- `finance.xlsx` + `Sheet1` -> `finance_sheet1`
+- real file parsing
+- normalized column names
+- basic type inference
+- real SQLite table creation
+- row insertion into SQLite
 
-Suggested column normalization:
+### XLSX
 
-- Convert header text to lowercase snake_case
-- Remove spaces and special characters
-- Deduplicate repeated names
-- Replace empty headers with generated names such as `column_1`, `column_2`
+Current XLSX behavior:
 
-### Field type inference
+- minimal real import support
+- reads the first useful sheet path
+- creates a SQLite table
+- imports a small but real schema/data path when parsing succeeds
 
-The first version should use practical type inference instead of trying to be perfect.
+If parsing fails:
 
-Suggested SQLite-oriented types:
+- the system falls back to placeholder schema scaffolding
 
-- `TEXT`
-- `INTEGER`
-- `REAL`
-- `DATE`
-- `DATETIME`
+### XLS
 
-Suggested inference signals:
+Current `.xls` behavior:
 
-- Header text
-- Sampled cell values
-- Value consistency across chunks
-- AI semantic hints for ambiguous business columns
+- accepted
+- generates placeholder schema/table scaffolding
+- returns explicit warnings
 
-Examples:
+It should be treated as a compatibility placeholder, not as a completed import feature.
 
-- `订单日期` -> likely `DATE`
-- `销售额` -> likely `REAL`
-- `数量` -> likely `INTEGER`
-- `客户名称` -> likely `TEXT`
+## Query Behavior
 
-### Metadata generated per table
+The current query layer is heuristic and intentionally narrow.
 
-Each imported table should produce metadata that is easier for AI to consume than raw SQLite introspection alone.
+It is not yet a true LLM-driven text-to-SQL engine.
 
-Suggested metadata fields:
+Current behavior:
 
-- `table_name`
+- if imported SQLite data is available, the service tries to execute SQL against the session database
+- if true execution cannot be completed, the service falls back to placeholder rows
+- the system always returns explainability fields such as:
+  - `summary`
+  - `sql`
+  - `query_plan`
+  - `warnings`
+
+Current query modes:
+
+- `detail`
+  - row-level preview style queries
+- `aggregate`
+  - total-style queries such as sum
+- `topn`
+  - grouped ranking queries
+- `trend`
+  - time-bucketed trend queries
+- `count`
+  - `COUNT(*)` style queries
+
+### Query Plan Metadata
+
+The current response includes a `query_plan` object with fields such as:
+
+- `source_table`
 - `source_file`
 - `source_sheet`
-- `row_count`
-- `columns`
-- `primary_semantics`
-- `time_columns`
-- `metric_columns`
-- `dimension_columns`
-- `sample_values`
-
-Example metadata fragment:
-
-```json
-{
-  "table_name": "sales_q1_report",
-  "source_file": "sales.xlsx",
-  "source_sheet": "Q1 Report",
-  "row_count": 102348,
-  "columns": [
-    { "name": "order_date", "type": "DATE", "semantic": "time" },
-    { "name": "product_name", "type": "TEXT", "semantic": "dimension" },
-    { "name": "revenue", "type": "REAL", "semantic": "metric" }
-  ]
-}
-```
-
-## Text-To-SQL Context
-
-Text-to-SQL should not rely only on the database schema. It should also use the metadata produced during import.
-
-The AI query layer should have access to:
-
-- Session table list
-- Column names and SQLite types
-- Source file and sheet names
-- Semantic labels such as metric, dimension, and time
-- Row counts and sample values
-- Query constraints such as row limits and forbidden full-table scans when possible
-
-This helps the model answer questions like:
-
-- "这个季度销售额最高的前十个产品是什么"
-- "按月份看客户增长趋势"
-- "华东区利润率最低的城市有哪些"
-
-### Text-to-SQL execution rules
-
-The first version should enforce a narrow execution policy:
-
-- Generate read-only SQL only
-- Prefer `SELECT` queries
-- Reject destructive SQL such as `DROP`, `DELETE`, and `UPDATE`
-- Apply result row limits by default
-- Return generated SQL together with rows for auditability
-
-### Recommended answer payload
-
-The query API should return both data and structured explanation for downstream rendering.
-
-Suggested response fields:
-
+- `selected_columns`
+- `filters`
+- `question`
+- `chart_type`
+- `mode`
 - `sql`
-- `rows`
-- `columns`
-- `summary`
-- `visualization`
-- `warnings`
 
-## Visualization
+This is intended to help both humans and upstream systems understand how the answer was formed.
 
-The query result should support direct data presentation.
+## Chart Output Modes
 
-Initial direction:
+The query layer supports three chart output modes.
 
-- Return normalized chart metadata from the API.
-- Support common chart types such as table, bar, line, pie, and scatter.
-- Keep the chart layer replaceable so it can connect to a local chart solution later.
+### `data`
 
-Suggested chart selection rules:
+Returns structured rows and visualization metadata. This is the most portable output mode.
 
-- Use `table` for detail records
-- Use `bar` for ranking and category comparison
-- Use `line` for time trends
-- Use `pie` only for low-cardinality composition
-- Use `scatter` for correlation-style analysis
+Best for:
 
-There is an MCP option available from chart providers, but it must run locally. For now, this repository will only define the output contract needed for local chart rendering.
+- custom frontend rendering
+- Dify agents
+- downstream UI frameworks
 
-## Minimal Architecture
+### `mermaid`
 
-The first version should stay simple and keep all responsibilities inside one container, but still separate concerns internally.
+Returns Mermaid chart content.
 
-Suggested modules:
+Current frontend behavior:
 
-- `api`: HTTP endpoints for session, upload, import status, query, and delete
-- `session`: session creation, metadata persistence, retention, and cleanup
-- `storage`: local file storage and session directory management
-- `importer`: Excel parsing, chunked row reading, and table loading
-- `schema`: header detection, column normalization, type inference, and metadata generation
-- `ai`: schema enrichment and text-to-SQL prompt orchestration
-- `query`: SQL validation, execution, result shaping, and chart suggestion
-- `worker`: background job execution for import and cleanup
+- Mermaid content is rendered directly into SVG inside assistant chat messages
 
-Suggested request flow:
+Best for:
 
-1. API receives a request.
-2. Session layer resolves the session workspace.
-3. Storage layer reads or writes local files.
-4. Importer or query layer handles the business logic.
-5. AI layer is called only where semantic inference is needed.
-6. Query result is returned as rows plus visualization metadata.
+- lightweight embedded chat visualizations
+- markdown-friendly chart responses
 
-## Recommended Project Layout
+### `mcp`
 
-Suggested repository layout for the first implementation:
+Returns chart-generation metadata intended for MCP-based downstream rendering.
+
+Current response includes:
+
+- local MCP endpoint
+- deployment name
+- tool name
+- chart payload
+
+Best for:
+
+- later execution through `@antv/mcp-server-chart`
+- systems that want a structured chart-rendering handoff
+
+## Frontend
+
+The main UI lives in `frontend/`.
+
+It is a chat-first workspace, not a generic dashboard shell.
+
+Current user-facing capabilities:
+
+- create sessions
+- inspect session list and summary counts
+- upload files into the selected session
+- configure provider/model/base URL/API key/MCP settings
+- ask questions in a chat box
+- see answers inline with:
+  - summary
+  - SQL
+  - chart area
+  - tabular result rows
+  - warnings
+
+Current frontend tech stack:
+
+- React
+- TypeScript
+- Vite
+- Tailwind
+- `shadcn/ui`
+- Mermaid
+
+The frontend dev server proxies:
+
+- `/api`
+- `/healthz`
+- `/readyz`
+
+to the Go backend.
+
+## Database Layout
+
+Each session database currently contains internal metadata tables such as:
+
+- `session_meta`
+- `import_tasks`
+- `imported_tables`
+- `imported_columns`
+
+Imported user data tables are then added alongside those metadata tables.
+
+This gives the service two useful layers:
+
+- actual imported data
+- queryable import/session diagnostics
+
+## Deployment
+
+### Docker Compose
+
+`compose.yaml` starts:
+
+- backend
+- frontend
+- local chart MCP sidecar
+
+### Health Checks
+
+Current readiness and health tooling:
+
+- `/healthz`
+- `/readyz`
+- Docker healthchecks
+- `make smoke`
+
+### Version Injection
+
+The service supports `APP_VERSION`, and version metadata is exposed in:
+
+- `/`
+- `/healthz`
+- `/readyz`
+
+## Current Roadmap Gaps
+
+Important unfinished areas:
+
+- full `.xlsx` workbook support
+- real `.xls` parsing
+- actual LLM-backed text-to-SQL
+- richer SQL validation and sandboxing
+- true MCP execution inside the backend
+- richer chart rendering beyond lightweight current UI presentation
+- production auth and multi-user access control
+
+## Recommended Use Cases Right Now
+
+This repository is currently best suited for:
+
+- local demos
+- internal prototyping
+- Dify tool integration
+- session-based spreadsheet Q&A experiments
+- chart-enabled chat workflows over small to medium imported datasets
+
+It is not yet positioned as:
+
+- a production BI platform
+- a fully general spreadsheet ingestion engine
+- a complete autonomous charting runtime
+
+## Repository Layout
+
+High-level structure:
 
 ```text
 .
 ├── README.md
+├── RELEASE_CHECKLIST.md
+├── Dockerfile
+├── compose.yaml
+├── Makefile
 ├── cmd/
 │   └── server/
-│       └── main.*
 ├── internal/
-│   ├── api/
-│   ├── session/
-│   ├── storage/
-│   ├── importer/
-│   ├── schema/
-│   ├── ai/
-│   ├── query/
-│   └── worker/
-├── data/
-│   └── sessions/
-├── configs/
+│   └── api/
+├── frontend/
 └── scripts/
 ```
 
-Directory intent:
+Current intent:
 
-- `cmd/server`: service entrypoint
-- `internal/api`: HTTP routes and request handlers
-- `internal/session`: session lifecycle and metadata management
-- `internal/storage`: local file paths, uploads, and session workspace helpers
-- `internal/importer`: Excel parsing and batch import logic
-- `internal/schema`: column normalization, type inference, and metadata output
-- `internal/ai`: prompts, model calls, and AI result shaping
-- `internal/query`: text-to-SQL generation, validation, execution, and formatting
-- `internal/worker`: async task runner and cleanup jobs
-- `data/sessions`: local runtime data, not source code
-- `configs`: runtime config templates
-- `scripts`: local development and maintenance scripts
+- `cmd/server`
+  - Go service entrypoint
+- `internal/api`
+  - HTTP handlers and most service logic
+- `frontend`
+  - main chat UI
+- `scripts`
+  - smoke and helper scripts
 
-## Async Task Model
+## Summary
 
-Excel import should be asynchronous by default because files can be large and imports may involve AI-assisted schema work.
+Current state of the project:
 
-Suggested task types:
+- runnable
+- locally deployable
+- session-isolated
+- SQLite-backed
+- chart-aware
+- Dify-friendly
+- frontend-backed by `shadcn/ui`
 
-- `import`
-- `cleanup`
-- `rebuild_schema`
+If you want the simplest integration path today:
 
-Suggested task states:
-
-- `pending`
-- `running`
-- `completed`
-- `failed`
-
-Minimum task metadata:
-
-- `task_id`
-- `session_id`
-- `type`
-- `status`
-- `created_at`
-- `started_at`
-- `finished_at`
-- `error`
-
-For the first version, tasks can be implemented with a simple in-process worker and persisted JSON metadata under the session directory.
-
-## Constraints And Guardrails
-
-The service should explicitly optimize for stability over maximum flexibility.
-
-Recommended guardrails:
-
-- Limit concurrent imports per session
-- Reject unsupported file formats early
-- Cap workbook and sheet parsing concurrency
-- Use batched inserts for SQLite writes
-- Add query timeout and row limit controls
-- Log generated SQL for debugging
-- Keep the AI prompt bounded to session-local schema only
-
-## V1 Delivery Scope
-
-The first deliverable does not need to solve every analytics problem. It only needs to make the core loop reliable:
-
-1. Create session
-2. Upload Excel files
-3. Import sheets into the session database
-4. Generate schema metadata
-5. Ask a natural-language question
-6. Generate and run read-only SQL
-7. Return rows and chart-ready metadata
-
-Out of scope for V1:
-
-- Cross-session joins
-- Multi-tenant auth system
-- Distributed workers
-- Heavy query optimization
-- Rich dashboard editor
-- Full MCP-driven chart runtime integration
-
-## Non-Goals For The First Version
-
-- Distributed storage
-- Multi-node task scheduling
-- Cloud database dependency
-- Complex permissions model
-- Production-grade chart orchestration
-
-## First Version Focus
-
-- Session-based workspace management
-- One SQLite database per session
-- Session lifecycle and cleanup
-- Reliable Excel upload
-- Large-sheet import
-- AI-based schema inference
-- Stable table naming and schema metadata generation
-- In-process async import worker
-- Local SQLite persistence
-- Natural-language to SQL query
-- Chart-friendly response payload
-
-## Status
-
-This README is the initial project definition. Implementation has not started yet.
+1. start the stack with `make up`
+2. use `POST /api/chat/upload` for the first request
+3. store the returned `session_id`
+4. use `POST /api/chat/query` for follow-up questions
