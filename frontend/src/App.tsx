@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
+import mermaid from "mermaid"
+import { useEffect, useId, useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -66,6 +67,12 @@ const initialSettings: Settings = {
   default_chart_mode: "data",
   mcp_server_url: "http://chart-mcp:1122/mcp",
 }
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "neutral",
+  securityLevel: "loose",
+})
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -436,9 +443,7 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
 
       <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
         {chart.mode === "mermaid" ? (
-          <pre className="overflow-auto text-xs text-stone-700">
-            {String(chart.content || "")}
-          </pre>
+          <MermaidChart content={String(chart.content || "")} />
         ) : chart.mode === "mcp" ? (
           <pre className="overflow-auto text-xs text-stone-700">
             {JSON.stringify(chart, null, 2)}
@@ -500,6 +505,64 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
         </div>
       ) : null}
     </div>
+  )
+}
+
+function MermaidChart({ content }: { content: string }) {
+  const [svg, setSVG] = useState("")
+  const [error, setError] = useState("")
+  const id = useId().replace(/[^a-zA-Z0-9_-]/g, "")
+
+  useEffect(() => {
+    let active = true
+
+    async function render() {
+      if (!content.trim()) {
+        setSVG("")
+        setError("")
+        return
+      }
+
+      try {
+        const result = await mermaid.render(`mermaid-${id}`, content)
+        if (!active) return
+        setSVG(result.svg)
+        setError("")
+      } catch (renderError) {
+        if (!active) return
+        setSVG("")
+        setError(asErrorMessage(renderError))
+      }
+    }
+
+    void render()
+
+    return () => {
+      active = false
+    }
+  }, [content, id])
+
+  if (error) {
+    return (
+      <div className="grid gap-2">
+        <div className="text-xs font-medium text-red-600">Mermaid 渲染失败</div>
+        <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
+          {content}
+        </pre>
+        <div className="text-xs text-stone-500">{error}</div>
+      </div>
+    )
+  }
+
+  if (!svg) {
+    return <div className="text-xs text-stone-500">正在渲染 Mermaid 图表...</div>
+  }
+
+  return (
+    <div
+      className="overflow-auto rounded-xl bg-white p-3"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
   )
 }
 
