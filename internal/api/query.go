@@ -73,10 +73,23 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "question is required", http.StatusBadRequest)
 		return
 	}
+	response, err := h.executeSessionQuery(sessionDir, meta, req)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.Error(w, "schema snapshot not found", http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, req queryRequest) (map[string]any, error) {
 	settings, err := h.readModelSettings()
 	if err != nil {
-		http.Error(w, "failed to read model settings", http.StatusInternalServerError)
-		return
+		return nil, errors.New("failed to read model settings")
 	}
 	chartMode := normalizeChartMode(req.ChartMode)
 	if chartMode == "" {
@@ -88,20 +101,14 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 
 	snapshot, err := loadSchemaForQuery(sessionDir, meta.DatabasePath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			http.Error(w, "schema snapshot not found", http.StatusConflict)
-			return
-		}
-		http.Error(w, "failed to read schema snapshot", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 
 	now := time.Now().UTC()
 	meta.LastAccessedAt = now
 	meta.UpdatedAt = now
 	if err := writeSessionMetadata(sessionDir, meta); err != nil {
-		http.Error(w, "failed to update session metadata", http.StatusInternalServerError)
-		return
+		return nil, errors.New("failed to update session metadata")
 	}
 
 	plan := buildQueryPlan(snapshot, req.Question)
@@ -122,21 +129,21 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 		"tables":           meta.Tables,
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
-		"question":   req.Question,
-		"sql":        plan.SQL,
-		"rows":       rows,
-		"columns":    columns,
-		"row_count":  len(rows),
-		"executed":   executed,
-		"chart_mode": chartMode,
-		"summary":    buildQuerySummary(plan, executed, len(rows)),
-		"query_plan": plan,
-		"visualization": visualization,
-		"chart":         buildChartOutput(chartMode, settings, plan, visualization, columns, rows),
-		"warnings": queryWarnings(plan, executed),
-	})
+	return map[string]any{
+		"session_id":     meta.SessionID,
+		"question":       req.Question,
+		"sql":            plan.SQL,
+		"rows":           rows,
+		"columns":        columns,
+		"row_count":      len(rows),
+		"executed":       executed,
+		"chart_mode":     chartMode,
+		"summary":        buildQuerySummary(plan, executed, len(rows)),
+		"query_plan":     plan,
+		"visualization":  visualization,
+		"chart":          buildChartOutput(chartMode, settings, plan, visualization, columns, rows),
+		"warnings":       queryWarnings(plan, executed),
+	}, nil
 }
 
 func readSchemaSnapshot(sessionDir string) (schemaSnapshot, error) {

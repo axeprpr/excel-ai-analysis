@@ -63,17 +63,30 @@ func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
+	meta, err := h.createSessionMetadata()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := writeSessionMetadata(filepath.Join(h.dataDir, "sessions", meta.SessionID), meta); err != nil {
+		http.Error(w, "failed to persist session metadata", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, buildSessionResponse(meta))
+}
+
+func (h *Handler) createSessionMetadata() (sessionMetadata, error) {
 	now := time.Now().UTC()
 	sessionID, err := newSessionID()
 	if err != nil {
-		http.Error(w, "failed to generate session id", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, errors.New("failed to generate session id")
 	}
 
 	sessionDir := filepath.Join(h.dataDir, "sessions", sessionID)
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		http.Error(w, "failed to create session directory", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, errors.New("failed to create session directory")
 	}
 
 	meta := sessionMetadata{
@@ -89,21 +102,14 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := initializeSessionWorkspace(sessionDir, meta.DatabasePath); err != nil {
-		http.Error(w, "failed to initialize session workspace", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, errors.New("failed to initialize session workspace")
 	}
 
 	if err := syncSessionMetaToDatabase(meta); err != nil {
-		http.Error(w, "failed to initialize session metadata in database", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, errors.New("failed to initialize session metadata in database")
 	}
 
-	if err := writeSessionMetadata(sessionDir, meta); err != nil {
-		http.Error(w, "failed to persist session metadata", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, buildSessionResponse(meta))
+	return meta, nil
 }
 
 func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {

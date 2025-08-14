@@ -1270,6 +1270,151 @@ func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 	return nil, fmt.Errorf("sqlite query failed after retries: %w", lastErr)
 }
 
+func TestChatUploadAutoCreatesSessionAndReturnsAnswer(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("question", "Show sales by category"); err != nil {
+		t.Fatalf("failed to write question field: %v", err)
+	}
+	if err := writer.WriteField("chart_mode", "mermaid"); err != nil {
+		t.Fatalf("failed to write chart_mode field: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", "sales.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("order_date,category,amount\n2025-01-01,A,10\n2025-01-02,B,20\n")); err != nil {
+		t.Fatalf("failed to write csv payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode chat upload response: %v", err)
+	}
+	sessionID, _ := resp["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in chat upload response")
+	}
+	if created, _ := resp["session_created"].(bool); !created {
+		t.Fatalf("expected session_created to be true, got %v", resp["session_created"])
+	}
+
+	answer, ok := resp["answer"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected answer object, got %v", resp["answer"])
+	}
+	if answer["chart_mode"] != "mermaid" {
+		t.Fatalf("expected chart_mode mermaid, got %v", answer["chart_mode"])
+	}
+	if answer["session_id"] != sessionID {
+		t.Fatalf("expected answer session_id %q, got %v", sessionID, answer["session_id"])
+	}
+	chart, ok := answer["chart"].(map[string]any)
+	if !ok || chart["mode"] != "mermaid" {
+		t.Fatalf("expected mermaid chart output, got %v", answer["chart"])
+	}
+	importResp, ok := resp["import"].(map[string]any)
+	if !ok || importResp["status"] != "completed" {
+		t.Fatalf("expected completed import response, got %v", resp["import"])
+	}
+}
+
+func TestChatQueryUsesExistingSession(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	var uploadBody bytes.Buffer
+	uploadWriter := multipart.NewWriter(&uploadBody)
+	part, err := uploadWriter.CreateFormFile("file", "sales.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("order_date,category,amount\n2025-01-01,A,10\n2025-01-02,B,20\n")); err != nil {
+		t.Fatalf("failed to write csv payload: %v", err)
+	}
+	if err := uploadWriter.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &uploadBody)
+	uploadReq.Header.Set("Content-Type", uploadWriter.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	queryReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/chat/query",
+		bytes.NewBufferString(`{"session_id":"`+sessionID+`","question":"count rows","chart_mode":"data"}`),
+	)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, queryRec.Code, queryRec.Body.String())
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode chat query response: %v", err)
+	}
+	if queryResp["session_id"] != sessionID {
+		t.Fatalf("expected session_id %q, got %v", sessionID, queryResp["session_id"])
+	}
+	answer, ok := queryResp["answer"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected answer object, got %v", queryResp["answer"])
+	}
+	if executed, _ := answer["executed"].(bool); !executed {
+		t.Fatalf("expected executed query response, got %v", answer["executed"])
+	}
+	if rowCount, _ := answer["row_count"].(float64); rowCount != 1 {
+		t.Fatalf("expected row_count 1, got %v", answer["row_count"])
+	}
+}
+
 func waitForImportTaskStatus(t *testing.T, handler http.Handler, sessionID, taskID, wantStatus string) {
 	t.Helper()
 

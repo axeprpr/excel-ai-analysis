@@ -49,46 +49,66 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionDir := filepath.Join(h.dataDir, "sessions", sessionID)
-	meta, err := readSessionMetadata(sessionDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			http.NotFound(w, r)
-			return
-		}
-		http.Error(w, "failed to read session", http.StatusInternalServerError)
-		return
-	}
-
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}
 
-	files := collectUploadedFiles(r.MultipartForm.File)
-	if len(files) == 0 {
-		http.Error(w, "no files uploaded", http.StatusBadRequest)
+	meta, task, savedFiles, err := h.prepareSessionUpload(sessionID, r.MultipartForm)
+	if err != nil {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			http.NotFound(w, r)
+		case strings.Contains(err.Error(), "unsupported file type"), strings.Contains(err.Error(), "no files uploaded"):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
+	}
+
+	go h.processImportTask(sessionID, task.TaskID)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"session_id":     sessionID,
+		"task_id":        task.TaskID,
+		"status":         task.Status,
+		"session_status": meta.Status,
+		"file_count":     len(task.FileNames),
+		"file_names":     task.FileNames,
+		"files":          savedFiles,
+		"warnings":       task.Warnings,
+		"created_at":     task.CreatedAt,
+	})
+}
+
+func (h *Handler) prepareSessionUpload(sessionID string, form *multipart.Form) (sessionMetadata, importTask, []uploadedFileInfo, error) {
+	sessionDir := filepath.Join(h.dataDir, "sessions", sessionID)
+	meta, err := readSessionMetadata(sessionDir)
+	if err != nil {
+		return sessionMetadata{}, importTask{}, nil, err
+	}
+
+	files := collectUploadedFiles(form.File)
+	if len(files) == 0 {
+		return sessionMetadata{}, importTask{}, nil, errors.New("no files uploaded")
 	}
 
 	uploadDir := filepath.Join(sessionDir, "uploads")
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, importTask{}, nil, errors.New("failed to create upload directory")
 	}
 
 	savedNames := make([]string, 0, len(files))
 	savedFiles := make([]uploadedFileInfo, 0, len(files))
 	for _, fh := range files {
 		if !isSupportedUploadFile(fh.Filename) {
-			http.Error(w, "unsupported file type", http.StatusBadRequest)
-			return
+			return sessionMetadata{}, importTask{}, nil, errors.New("unsupported file type")
 		}
 
 		savedName, err := saveUploadedFile(uploadDir, fh)
 		if err != nil {
-			http.Error(w, "failed to save uploaded file", http.StatusInternalServerError)
-			return
+			return sessionMetadata{}, importTask{}, nil, errors.New("failed to save uploaded file")
 		}
 		savedNames = append(savedNames, savedName)
 		savedFiles = append(savedFiles, uploadedFileInfo{
@@ -104,33 +124,18 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 	meta.LastAccessedAt = now
 	meta.UploadedFiles = appendUnique(meta.UploadedFiles, savedNames...)
 	if err := writeSessionMetadata(sessionDir, meta); err != nil {
-		http.Error(w, "failed to update session metadata", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, importTask{}, nil, errors.New("failed to update session metadata")
 	}
 
 	task, err := writeImportTask(sessionDir, sessionID, savedNames, now)
 	if err != nil {
-		http.Error(w, "failed to create import task", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, importTask{}, nil, errors.New("failed to create import task")
 	}
 	if err := syncImportTaskToDatabase(meta.DatabasePath, task); err != nil {
-		http.Error(w, "failed to persist import task in database", http.StatusInternalServerError)
-		return
+		return sessionMetadata{}, importTask{}, nil, errors.New("failed to persist import task in database")
 	}
 
-	go h.processImportTask(sessionID, task.TaskID)
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"session_id":     sessionID,
-		"task_id":        task.TaskID,
-		"status":         task.Status,
-		"session_status": meta.Status,
-		"file_count":     len(savedNames),
-		"file_names":     savedNames,
-		"files":          savedFiles,
-		"warnings":       task.Warnings,
-		"created_at":     task.CreatedAt,
-	})
+	return meta, task, savedFiles, nil
 }
 
 func writeImportTask(sessionDir, sessionID string, fileNames []string, now time.Time) (importTask, error) {
