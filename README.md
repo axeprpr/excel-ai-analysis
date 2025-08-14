@@ -90,6 +90,8 @@ Implemented endpoints:
 - `GET /readyz`
 - `GET /api/settings/model`
 - `PUT /api/settings/model`
+- `POST /api/chat/upload`
+- `POST /api/chat/query`
 - `GET /api/status`
 - `GET /api/sessions`
 - `POST /api/sessions`
@@ -105,6 +107,14 @@ Implemented endpoints:
 
 Current endpoint summary highlights:
 
+- `POST /api/chat/upload` is the Dify-friendly entrypoint:
+  - auto-creates a session when `session_id` is omitted
+  - uploads files
+  - runs import synchronously for the request
+  - optionally executes a query immediately when `question` is provided
+- `POST /api/chat/query` is the Dify-friendly follow-up entrypoint:
+  - accepts `session_id`
+  - executes a follow-up question against an existing ready session
 - `GET /api/status` returns global summary counts across local sessions
 - `GET /console` still serves the legacy minimal console, but the primary UI now lives in the `frontend/` app
 - `GET /api/sessions` and `GET /api/sessions/:session_id` return session-level summary counters
@@ -155,6 +165,48 @@ Current chart output modes:
 - `data`
 - `mermaid`
 - `mcp`
+
+## Dify-Friendly Integration
+
+For an agent-style integration, Dify does not need to manage the internal session workflow itself.
+
+Recommended pattern:
+
+1. First request calls `POST /api/chat/upload`
+2. Omit `session_id` to auto-create a new isolated session
+3. Send one or more files with `multipart/form-data`
+4. Optionally include:
+   - `question`
+   - `chart_mode`
+5. Persist the returned `session_id` in Dify conversation variables
+6. Follow-up requests call `POST /api/chat/query` with that same `session_id`
+
+`POST /api/chat/upload` accepts form fields:
+
+- `session_id` optional
+- `question` optional
+- `chart_mode` optional
+- one or more uploaded `file` parts
+
+`POST /api/chat/query` accepts JSON:
+
+```json
+{
+  "session_id": "sess_xxx",
+  "question": "Show sales by category",
+  "chart_mode": "mermaid"
+}
+```
+
+Both endpoints return structured data intended for agent orchestration:
+
+- `session_id`
+- query `summary`
+- `sql`
+- `rows`
+- `columns`
+- `chart`
+- `warnings`
 
 In the current frontend:
 
