@@ -8,6 +8,7 @@ It is built around one core idea:
 - import them into a session-local `SQLite` database
 - ask natural-language questions
 - return text, SQL, table data, and chart-ready output
+- optionally let a configured OpenAI-compatible model propose SQL before falling back to the built-in planner
 
 The repository already contains a runnable V1 baseline with backend APIs, a `shadcn/ui` chat frontend, local session storage, and local chart integration scaffolding.
 
@@ -62,6 +63,7 @@ Implemented today:
 - `shadcn/ui` frontend in `frontend/`
 - chat-style UI with inline result rendering
 - readiness, health, smoke, and basic deployment tooling
+- exported OpenAPI 3.1 document at `GET /openapi.json`
 
 Current limits:
 
@@ -70,6 +72,7 @@ Current limits:
 - invalid `.xlsx` files fall back to placeholder schema scaffolding
 - `.xls` is not truly parsed yet
 - AI text-to-SQL is still heuristic and local-rule based
+- the LLM-backed SQL planning path is experimental and falls back to the local planner on provider errors or unsafe SQL
 - MCP chart output currently returns payload and endpoint info for downstream execution; it does not yet execute the chart MCP inside the Go request path
 
 ## Architecture
@@ -243,6 +246,7 @@ Current implementation status:
 Implemented top-level routes:
 
 - `GET /`
+- `GET /openapi.json`
 - `GET /console`
 - `GET /healthz`
 - `GET /readyz`
@@ -267,6 +271,8 @@ Implemented top-level routes:
 
 - `GET /`
   - returns service metadata, capabilities, routes, and runtime config
+- `GET /openapi.json`
+  - exports an OpenAPI 3.1 document for Dify, agent platforms, and tool import flows
 - `GET /healthz`
   - basic process health
 - `GET /readyz`
@@ -289,6 +295,8 @@ Current stored settings include:
 - `mcp_server_url`
 
 These settings are stored locally and are currently used as configuration input rather than as a fully wired LLM execution layer.
+
+If `provider`, `model`, `base_url`, and `api_key` are all configured, the query layer will first try an OpenAI-compatible SQL generation request and then fall back to the built-in planner if that request fails or returns unsafe SQL.
 
 ### Session APIs
 
