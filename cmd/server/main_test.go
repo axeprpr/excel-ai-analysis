@@ -84,4 +84,29 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	if consoleRec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, consoleRec.Code)
 	}
+
+	openAPIReq := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
+	openAPIRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(openAPIRec, openAPIReq)
+	if openAPIRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, openAPIRec.Code)
+	}
+
+	var openAPIResp map[string]any
+	if err := json.Unmarshal(openAPIRec.Body.Bytes(), &openAPIResp); err != nil {
+		t.Fatalf("failed to decode openapi response: %v", err)
+	}
+	if openAPIResp["openapi"] != "3.1.0" {
+		t.Fatalf("unexpected openapi version: %v", openAPIResp["openapi"])
+	}
+	paths, ok := openAPIResp["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected paths in openapi response")
+	}
+	if _, ok := paths["/api/chat/upload"]; !ok {
+		t.Fatalf("expected /api/chat/upload in openapi paths")
+	}
+	if _, ok := paths["/api/chat/query"]; !ok {
+		t.Fatalf("expected /api/chat/query in openapi paths")
+	}
 }

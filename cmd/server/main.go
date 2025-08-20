@@ -77,6 +77,7 @@ func newServer(addr, dataDir, version string) *http.Server {
 			},
 			"routes": []string{
 				"GET /",
+				"GET /openapi.json",
 				"GET /console",
 				"GET /healthz",
 				"GET /readyz",
@@ -95,6 +96,14 @@ func newServer(addr, dataDir, version string) *http.Server {
 				"POST /api/sessions/:session_id/query",
 			},
 		})
+	})
+	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.OpenAPISpec())
 	})
 	mux.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
