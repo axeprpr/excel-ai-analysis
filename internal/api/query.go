@@ -640,11 +640,10 @@ func buildChartOutput(chartMode string, settings modelSettings, plan queryPlan, 
 			"content": buildMermaidChart(visualization, columns, rows),
 		}
 	case "mcp":
-		return map[string]any{
+		out := map[string]any{
 			"mode":        "mcp",
 			"deployment":  "@antv/mcp-server-chart",
 			"endpoint":    settings.MCPServerURL,
-			"tool":        "render_chart",
 			"payload": map[string]any{
 				"title":         visualization["title"],
 				"visualization": visualization,
@@ -653,6 +652,21 @@ func buildChartOutput(chartMode string, settings modelSettings, plan queryPlan, 
 				"query_plan":    plan,
 			},
 		}
+		result, err := executeChartMCP(settings.MCPServerURL, visualization, columns, rows)
+		if err != nil {
+			out["executed"] = false
+			out["error"] = err.Error()
+			return out
+		}
+		out["executed"] = true
+		out["result"] = result
+		if toolName, ok := result["tool_name"]; ok {
+			out["tool"] = toolName
+		}
+		if url, ok := result["url"]; ok {
+			out["url"] = url
+		}
+		return out
 	default:
 		return map[string]any{
 			"mode":          "data",

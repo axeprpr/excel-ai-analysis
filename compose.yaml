@@ -25,19 +25,19 @@ services:
         condition: service_started
 
   chart-mcp:
-    image: node:20-bookworm
-    working_dir: /app
-    command: ["npx", "-y", "@antv/mcp-server-chart", "--transport", "streamable", "--host", "0.0.0.0", "--port", "1122"]
+    build:
+      context: .
+      dockerfile: Dockerfile.chart-mcp
+    image: excel-ai-analysis-chart-mcp:local
     ports:
       - "1122:1122"
 
   frontend:
-    image: node:20-bookworm
-    working_dir: /app
-    command: ["bash", "-lc", "npm install && npm run dev -- --host 0.0.0.0 --port 4173"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: excel-ai-analysis-frontend:local
     environment:
       VITE_API_PROXY_TARGET: http://excel-ai-analysis:8080
     ports:
       - "4173:4173"
-    volumes:
-      - ./frontend:/app

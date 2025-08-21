@@ -102,3 +102,12 @@ func normalizeChartMode(mode string) string {
 		return ""
 	}
 }
+
+func offlineModeEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OFFLINE_MODE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}

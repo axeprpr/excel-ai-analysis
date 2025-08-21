@@ -1,0 +1,7 @@
+FROM node:20-bookworm
+
+RUN npm install -g @antv/mcp-server-chart@0.9.10
+
+EXPOSE 1122
+
+CMD ["node", "-e", "require('/usr/local/lib/node_modules/@antv/mcp-server-chart/build/server.js').runHTTPStreamableServer('0.0.0.0',1122,'/mcp')"]
