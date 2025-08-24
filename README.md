@@ -60,10 +60,12 @@ Implemented today:
   - `mermaid`
   - `mcp`
 - local `@antv/mcp-server-chart` sidecar deployment via Compose
+- real MCP HTTP execution against the configured local chart sidecar in `mcp` mode
 - `shadcn/ui` frontend in `frontend/`
 - chat-style UI with inline result rendering
 - readiness, health, smoke, and basic deployment tooling
 - exported OpenAPI 3.1 document at `GET /openapi.json`
+- offline-ready local images for backend, frontend, and chart-mcp
 
 Current limits:
 
@@ -73,7 +75,7 @@ Current limits:
 - `.xls` is not truly parsed yet
 - AI text-to-SQL is still heuristic and local-rule based
 - the LLM-backed SQL planning path is experimental and falls back to the local planner on provider errors or unsafe SQL
-- MCP chart output currently returns payload and endpoint info for downstream execution; it does not yet execute the chart MCP inside the Go request path
+- chart MCP execution depends on a reachable local `mcp_server_url` and a supported chart shape
 
 ## Architecture
 
@@ -184,6 +186,12 @@ After startup:
 - frontend UI: `http://127.0.0.1:4173`
 - local chart MCP sidecar: `http://127.0.0.1:1122/mcp`
 
+Offline deployment note:
+
+- runtime containers no longer depend on `npm install` or `npx` at startup
+- `frontend` and `chart-mcp` are built into local images before deployment
+- when you want LLM planning or MCP chart execution in an offline environment, point the service to your own reachable internal endpoints
+
 ## Runtime Services
 
 ### Backend
@@ -239,7 +247,7 @@ Current implementation status:
 - deployed locally
 - exposed to the system
 - referenced by settings and query output
-- not yet fully executed inside the backend query path
+- executed by the backend query path in `mcp` mode through MCP JSON-RPC over HTTP
 
 ## API Overview
 
@@ -613,11 +621,14 @@ Current response includes:
 - deployment name
 - tool name
 - chart payload
+- execution status
+- chart result metadata
+- rendered chart URL when returned by the MCP server
 
 Best for:
 
-- later execution through `@antv/mcp-server-chart`
-- systems that want a structured chart-rendering handoff
+- local execution through `@antv/mcp-server-chart`
+- systems that want both a structured chart payload and a rendered chart artifact
 
 ## Frontend
 
@@ -681,6 +692,8 @@ This gives the service two useful layers:
 - backend
 - frontend
 - local chart MCP sidecar
+
+The frontend and chart MCP services are now built from Dockerfiles in this repository instead of downloading npm dependencies at runtime.
 
 ### Health Checks
 
