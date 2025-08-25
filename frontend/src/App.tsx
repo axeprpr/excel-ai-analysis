@@ -429,6 +429,11 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
   const rows = response.rows || []
   const columns = response.columns || []
   const chart = (response.chart || {}) as Record<string, unknown>
+  const mcpResult = (chart.result || {}) as Record<string, unknown>
+  const mcpURL = typeof chart.url === "string" ? chart.url : typeof mcpResult.url === "string" ? mcpResult.url : ""
+  const mcpExecuted = typeof chart.executed === "boolean" ? chart.executed : false
+  const mcpTool = String(chart.tool || mcpResult.tool_name || "")
+  const mcpError = String(chart.error || "")
 
   return (
     <div className="grid gap-3 rounded-3xl border border-stone-200 bg-white p-4 shadow-sm">
@@ -445,9 +450,45 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
         {chart.mode === "mermaid" ? (
           <MermaidChart content={String(chart.content || "")} />
         ) : chart.mode === "mcp" ? (
-          <pre className="overflow-auto text-xs text-stone-700">
-            {JSON.stringify(chart, null, 2)}
-          </pre>
+          <div className="grid gap-3">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <Badge className={mcpExecuted ? "bg-emerald-100 text-emerald-700" : "bg-stone-200 text-stone-700"}>
+                executed: {String(mcpExecuted)}
+              </Badge>
+              {mcpTool ? <Badge className="bg-orange-100 text-orange-700">{mcpTool}</Badge> : null}
+              {typeof chart.endpoint === "string" && chart.endpoint ? (
+                <Badge className="bg-sky-100 text-sky-700">{String(chart.endpoint)}</Badge>
+              ) : null}
+            </div>
+
+            {mcpURL ? (
+              <div className="grid gap-2">
+                <a
+                  className="text-xs font-medium text-orange-700 underline underline-offset-2"
+                  href={mcpURL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open rendered chart
+                </a>
+                <img
+                  src={mcpURL}
+                  alt="Rendered MCP chart"
+                  className="max-h-[420px] rounded-2xl border border-stone-200 bg-white object-contain"
+                />
+              </div>
+            ) : null}
+
+            {mcpError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {mcpError}
+              </div>
+            ) : null}
+
+            <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
+              {JSON.stringify(chart, null, 2)}
+            </pre>
+          </div>
         ) : (
           <div className="grid gap-3">
             {rows.slice(0, 8).map((row, index) => {
