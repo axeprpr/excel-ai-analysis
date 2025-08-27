@@ -1,7 +1,15 @@
 package api
 
 type sqlPlan struct {
+	SourceTable      string
+	SourceFile       string
+	SourceSheet      string
 	Mode            string
+	ChartType       string
+	DimensionColumn string
+	MetricColumn    string
+	TimeColumn      string
+	FilterHints     []string
 	SelectedColumns []string
 	SQL             string
 }
@@ -9,15 +17,34 @@ type sqlPlan struct {
 func buildSQLPlan(snapshot schemaSnapshot, question string, intent queryIntent) sqlPlan {
 	if len(snapshot.Tables) == 0 {
 		return sqlPlan{
+			SourceTable:      "",
+			SourceFile:       "",
+			SourceSheet:      "",
 			Mode:            intent.Mode,
+			ChartType:       intent.ChartType,
+			DimensionColumn: "",
+			MetricColumn:    "",
+			TimeColumn:      "",
+			FilterHints:     intent.FilterHints,
 			SelectedColumns: []string{},
 			SQL:             "-- no imported tables available",
 		}
 	}
 
 	table := snapshot.Tables[0]
+	dimension := firstDimensionColumn(table)
+	metric := firstMetricColumn(table)
+	timeColumn := firstTimeColumn(table)
 	return sqlPlan{
+		SourceTable:      table.TableName,
+		SourceFile:       table.SourceFile,
+		SourceSheet:      table.SourceSheet,
 		Mode:            intent.Mode,
+		ChartType:       intent.ChartType,
+		DimensionColumn: dimension,
+		MetricColumn:    metric,
+		TimeColumn:      timeColumn,
+		FilterHints:     intent.FilterHints,
 		SelectedColumns: selectedColumnsForMode(table, intent.Mode),
 		SQL:             buildSQLForIntent(table, intent),
 	}

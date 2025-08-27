@@ -28,6 +28,9 @@ type queryPlan struct {
 	SourceTable     string   `json:"source_table"`
 	SourceFile      string   `json:"source_file"`
 	SourceSheet     string   `json:"source_sheet"`
+	DimensionColumn string   `json:"dimension_column"`
+	MetricColumn    string   `json:"metric_column"`
+	TimeColumn      string   `json:"time_column"`
 	SelectedColumns []string `json:"selected_columns"`
 	Filters         []string `json:"filters"`
 	Question        string   `json:"question"`
@@ -348,13 +351,16 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 	sqlPlan := buildSQLPlan(snapshot, question, intent)
 
 	return queryPlan{
-		SourceTable:     table.TableName,
-		SourceFile:      table.SourceFile,
-		SourceSheet:     table.SourceSheet,
+		SourceTable:     sqlPlan.SourceTable,
+		SourceFile:      sqlPlan.SourceFile,
+		SourceSheet:     sqlPlan.SourceSheet,
+		DimensionColumn: sqlPlan.DimensionColumn,
+		MetricColumn:    sqlPlan.MetricColumn,
+		TimeColumn:      sqlPlan.TimeColumn,
 		SelectedColumns: sqlPlan.SelectedColumns,
-		Filters:         intent.FilterHints,
+		Filters:         sqlPlan.FilterHints,
 		Question:        question,
-		ChartType:       intent.ChartType,
+		ChartType:       sqlPlan.ChartType,
 		Mode:            sqlPlan.Mode,
 		SQL:             sqlPlan.SQL,
 	}
