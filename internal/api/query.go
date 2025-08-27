@@ -345,57 +345,19 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 
 	table := snapshot.Tables[0]
 	intent := detectQueryIntent(question, table)
-	mode := intent.Mode
-	selectedColumns := selectedColumnsForMode(table, mode)
-	sql := buildSQLForQuestion(snapshot, question)
+	sqlPlan := buildSQLPlan(snapshot, question, intent)
 
 	return queryPlan{
 		SourceTable:     table.TableName,
 		SourceFile:      table.SourceFile,
 		SourceSheet:     table.SourceSheet,
-		SelectedColumns: selectedColumns,
+		SelectedColumns: sqlPlan.SelectedColumns,
 		Filters:         intent.FilterHints,
 		Question:        question,
 		ChartType:       intent.ChartType,
-		Mode:            mode,
-		SQL:             sql,
+		Mode:            sqlPlan.Mode,
+		SQL:             sqlPlan.SQL,
 	}
-}
-
-func buildSQLForQuestion(snapshot schemaSnapshot, question string) string {
-	if len(snapshot.Tables) == 0 {
-		return "-- no imported tables available"
-	}
-
-	table := snapshot.Tables[0]
-	dimension := firstDimensionColumn(table)
-	metric := firstMetricColumn(table)
-	mode := detectQueryIntent(question, table).Mode
-
-	switch mode {
-	case "count":
-		return "SELECT COUNT(*) AS total_count FROM " + table.TableName + ";"
-	case "trend":
-		timeColumn := firstTimeColumn(table)
-		if timeColumn != "" && metric != "" {
-			return "SELECT substr(" + timeColumn + ", 1, 7) AS time_bucket, SUM(" + metric + ") AS total_value FROM " + table.TableName +
-				" GROUP BY time_bucket ORDER BY time_bucket ASC;"
-		}
-	case "topn":
-		if dimension != "" && metric != "" {
-			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +
-				" GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 10;"
-		}
-	case "aggregate":
-		if metric != "" {
-			return "SELECT SUM(" + metric + ") AS total_value FROM " + table.TableName + ";"
-		}
-	}
-
-	if dimension != "" && metric != "" {
-		return "SELECT " + dimension + ", " + metric + " FROM " + table.TableName + " LIMIT 100;"
-	}
-	return buildPlaceholderSQL(snapshot)
 }
 
 func selectedColumnsForMode(table tableSchema, mode string) []string {
