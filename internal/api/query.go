@@ -33,6 +33,7 @@ type queryPlan struct {
 	TimeColumn      string   `json:"time_column"`
 	SelectedColumns []string `json:"selected_columns"`
 	Filters         []string `json:"filters"`
+	PlannedFilters  []plannedFilter `json:"planned_filters"`
 	Question        string   `json:"question"`
 	ChartType       string   `json:"chart_type"`
 	Mode            string   `json:"mode"`
@@ -341,6 +342,7 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 			SourceSheet:     "",
 			SelectedColumns: []string{},
 			Filters:         []string{},
+			PlannedFilters:  nil,
 			Question:        question,
 			SQL:             "-- no imported tables available",
 		}
@@ -359,6 +361,7 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 		TimeColumn:      sqlPlan.TimeColumn,
 		SelectedColumns: sqlPlan.SelectedColumns,
 		Filters:         sqlPlan.FilterHints,
+		PlannedFilters:  sqlPlan.Filters,
 		Question:        question,
 		ChartType:       sqlPlan.ChartType,
 		Mode:            sqlPlan.Mode,

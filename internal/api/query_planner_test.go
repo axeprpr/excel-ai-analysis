@@ -6,9 +6,9 @@ import (
 )
 
 func TestBuildTrendSQLByGranularity(t *testing.T) {
-	monthSQL := buildTrendSQL("sales", "order_date", "amount", "month")
-	daySQL := buildTrendSQL("sales", "order_date", "amount", "day")
-	yearSQL := buildTrendSQL("sales", "order_date", "amount", "year")
+	monthSQL := buildTrendSQL("sales", "order_date", "amount", "month", "")
+	daySQL := buildTrendSQL("sales", "order_date", "amount", "day", "")
+	yearSQL := buildTrendSQL("sales", "order_date", "amount", "year", "")
 
 	if !strings.Contains(monthSQL, "substr(order_date, 1, 7)") {
 		t.Fatalf("expected month sql to bucket by month, got %q", monthSQL)
@@ -54,5 +54,11 @@ func TestBuildSQLPlanCarriesStructuredSelections(t *testing.T) {
 	}
 	if len(plan.FilterHints) == 0 {
 		t.Fatalf("expected filter hints to be populated")
+	}
+	if len(plan.Filters) == 0 {
+		t.Fatalf("expected planned filters to be populated")
+	}
+	if !strings.Contains(plan.SQL, "WHERE") {
+		t.Fatalf("expected planned SQL to include WHERE clause, got %q", plan.SQL)
 	}
 }
