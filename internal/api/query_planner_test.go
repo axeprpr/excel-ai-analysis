@@ -43,6 +43,9 @@ func TestBuildSQLPlanCarriesStructuredSelections(t *testing.T) {
 	if plan.SourceTable != "sales" {
 		t.Fatalf("expected source table sales, got %q", plan.SourceTable)
 	}
+	if len(plan.CandidateTables) != 1 || plan.CandidateTables[0] != "sales" {
+		t.Fatalf("expected candidate tables to include sales, got %#v", plan.CandidateTables)
+	}
 	if plan.DimensionColumn != "category" {
 		t.Fatalf("expected dimension column category, got %q", plan.DimensionColumn)
 	}
@@ -60,5 +63,45 @@ func TestBuildSQLPlanCarriesStructuredSelections(t *testing.T) {
 	}
 	if !strings.Contains(plan.SQL, "WHERE") {
 		t.Fatalf("expected planned SQL to include WHERE clause, got %q", plan.SQL)
+	}
+}
+
+func TestBuildSQLPlanSelectsBestMatchingTable(t *testing.T) {
+	snapshot := schemaSnapshot{
+		Tables: []tableSchema{
+			{
+				TableName:   "sales",
+				SourceFile:  "sales.csv",
+				SourceSheet: "Sheet1",
+				Columns: []schemaColumn{
+					{Name: "order_date", Type: "DATE", Semantic: "time"},
+					{Name: "category", Type: "TEXT", Semantic: "dimension"},
+					{Name: "amount", Type: "REAL", Semantic: "metric"},
+				},
+			},
+			{
+				TableName:   "customers",
+				SourceFile:  "customers.csv",
+				SourceSheet: "Sheet1",
+				Columns: []schemaColumn{
+					{Name: "created_at", Type: "DATE", Semantic: "time"},
+					{Name: "region", Type: "TEXT", Semantic: "dimension"},
+					{Name: "customer_count", Type: "INTEGER", Semantic: "metric"},
+				},
+			},
+		},
+	}
+
+	intent := detectQueryIntent("show customer trend by month", snapshot.Tables[0])
+	plan := buildSQLPlan(snapshot, "show customer trend by month", intent)
+
+	if plan.SourceTable != "customers" {
+		t.Fatalf("expected source table customers, got %q", plan.SourceTable)
+	}
+	if len(plan.CandidateTables) == 0 || plan.CandidateTables[0] != "customers" {
+		t.Fatalf("expected candidate tables to prioritize customers, got %#v", plan.CandidateTables)
+	}
+	if !strings.Contains(plan.SQL, "FROM customers") {
+		t.Fatalf("expected SQL to target customers table, got %q", plan.SQL)
 	}
 }

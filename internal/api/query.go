@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -25,19 +25,20 @@ type schemaSnapshot struct {
 }
 
 type queryPlan struct {
-	SourceTable     string   `json:"source_table"`
-	SourceFile      string   `json:"source_file"`
-	SourceSheet     string   `json:"source_sheet"`
-	DimensionColumn string   `json:"dimension_column"`
-	MetricColumn    string   `json:"metric_column"`
-	TimeColumn      string   `json:"time_column"`
-	SelectedColumns []string `json:"selected_columns"`
-	Filters         []string `json:"filters"`
+	SourceTable     string          `json:"source_table"`
+	SourceFile      string          `json:"source_file"`
+	SourceSheet     string          `json:"source_sheet"`
+	CandidateTables []string        `json:"candidate_tables"`
+	DimensionColumn string          `json:"dimension_column"`
+	MetricColumn    string          `json:"metric_column"`
+	TimeColumn      string          `json:"time_column"`
+	SelectedColumns []string        `json:"selected_columns"`
+	Filters         []string        `json:"filters"`
 	PlannedFilters  []plannedFilter `json:"planned_filters"`
-	Question        string   `json:"question"`
-	ChartType       string   `json:"chart_type"`
-	Mode            string   `json:"mode"`
-	SQL             string   `json:"sql"`
+	Question        string          `json:"question"`
+	ChartType       string          `json:"chart_type"`
+	Mode            string          `json:"mode"`
+	SQL             string          `json:"sql"`
 }
 
 func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
@@ -134,19 +135,19 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 	}
 
 	return map[string]any{
-		"session_id":     meta.SessionID,
-		"question":       req.Question,
-		"sql":            plan.SQL,
-		"rows":           rows,
-		"columns":        columns,
-		"row_count":      len(rows),
-		"executed":       executed,
-		"chart_mode":     chartMode,
-		"summary":        buildQuerySummary(plan, executed, len(rows)),
-		"query_plan":     plan,
-		"visualization":  visualization,
-		"chart":          buildChartOutput(chartMode, settings, plan, visualization, columns, rows),
-		"warnings":       append(plannerWarnings, queryWarnings(plan, executed)...),
+		"session_id":    meta.SessionID,
+		"question":      req.Question,
+		"sql":           plan.SQL,
+		"rows":          rows,
+		"columns":       columns,
+		"row_count":     len(rows),
+		"executed":      executed,
+		"chart_mode":    chartMode,
+		"summary":       buildQuerySummary(plan, executed, len(rows)),
+		"query_plan":    plan,
+		"visualization": visualization,
+		"chart":         buildChartOutput(chartMode, settings, plan, visualization, columns, rows),
+		"warnings":      append(plannerWarnings, queryWarnings(plan, executed)...),
 	}, nil
 }
 
@@ -180,6 +181,7 @@ func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, snapshot sc
 		SourceTable:     table.TableName,
 		SourceFile:      table.SourceFile,
 		SourceSheet:     table.SourceSheet,
+		CandidateTables: []string{table.TableName},
 		SelectedColumns: selectedColumnsForMode(table, mode),
 		Filters:         []string{},
 		Question:        question,
@@ -340,6 +342,7 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 			SourceTable:     "",
 			SourceFile:      "",
 			SourceSheet:     "",
+			CandidateTables: []string{},
 			SelectedColumns: []string{},
 			Filters:         []string{},
 			PlannedFilters:  nil,
@@ -356,6 +359,7 @@ func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
 		SourceTable:     sqlPlan.SourceTable,
 		SourceFile:      sqlPlan.SourceFile,
 		SourceSheet:     sqlPlan.SourceSheet,
+		CandidateTables: sqlPlan.CandidateTables,
 		DimensionColumn: sqlPlan.DimensionColumn,
 		MetricColumn:    sqlPlan.MetricColumn,
 		TimeColumn:      sqlPlan.TimeColumn,
@@ -552,9 +556,9 @@ func buildChartOutput(chartMode string, settings modelSettings, plan queryPlan, 
 		}
 	case "mcp":
 		out := map[string]any{
-			"mode":        "mcp",
-			"deployment":  "@antv/mcp-server-chart",
-			"endpoint":    settings.MCPServerURL,
+			"mode":       "mcp",
+			"deployment": "@antv/mcp-server-chart",
+			"endpoint":   settings.MCPServerURL,
 			"payload": map[string]any{
 				"title":         visualization["title"],
 				"visualization": visualization,
