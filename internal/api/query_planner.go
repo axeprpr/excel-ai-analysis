@@ -11,71 +11,77 @@ type plannedFilter struct {
 	Value    string
 }
 
+type scoredTable struct {
+	table tableSchema
+	score int
+}
+
 type sqlPlan struct {
-	SourceTable     string
-	SourceFile      string
-	SourceSheet     string
-	Mode            string
-	ChartType       string
-	CandidateTables []string
-	DimensionColumn string
-	MetricColumn    string
-	TimeColumn      string
-	FilterHints     []string
-	Filters         []plannedFilter
-	SelectedColumns []string
-	SQL             string
+	SourceTable        string
+	SourceFile         string
+	SourceSheet        string
+	Mode               string
+	ChartType          string
+	CandidateTables    []string
+	PlanningConfidence float64
+	SelectionReason    string
+	DimensionColumn    string
+	MetricColumn       string
+	TimeColumn         string
+	FilterHints        []string
+	Filters            []plannedFilter
+	SelectedColumns    []string
+	SQL                string
 }
 
 func buildSQLPlan(snapshot schemaSnapshot, question string, intent queryIntent) sqlPlan {
 	if len(snapshot.Tables) == 0 {
 		return sqlPlan{
-			SourceTable:     "",
-			SourceFile:      "",
-			SourceSheet:     "",
-			Mode:            intent.Mode,
-			ChartType:       intent.ChartType,
-			CandidateTables: []string{},
-			DimensionColumn: "",
-			MetricColumn:    "",
-			TimeColumn:      "",
-			FilterHints:     intent.FilterHints,
-			Filters:         nil,
-			SelectedColumns: []string{},
-			SQL:             "-- no imported tables available",
+			SourceTable:        "",
+			SourceFile:         "",
+			SourceSheet:        "",
+			Mode:               intent.Mode,
+			ChartType:          intent.ChartType,
+			CandidateTables:    []string{},
+			PlanningConfidence: 0,
+			SelectionReason:    "no imported tables available",
+			DimensionColumn:    "",
+			MetricColumn:       "",
+			TimeColumn:         "",
+			FilterHints:        intent.FilterHints,
+			Filters:            nil,
+			SelectedColumns:    []string{},
+			SQL:                "-- no imported tables available",
 		}
 	}
 
-	table, candidates := choosePlanningTable(snapshot, question)
+	table, candidates, confidence, reason := choosePlanningTable(snapshot, question)
 	dimension := firstDimensionColumn(table)
 	metric := firstMetricColumn(table)
 	timeColumn := firstTimeColumn(table)
 	filters := planFilters(table, intent)
 	return sqlPlan{
-		SourceTable:     table.TableName,
-		SourceFile:      table.SourceFile,
-		SourceSheet:     table.SourceSheet,
-		CandidateTables: candidates,
-		Mode:            intent.Mode,
-		ChartType:       intent.ChartType,
-		DimensionColumn: dimension,
-		MetricColumn:    metric,
-		TimeColumn:      timeColumn,
-		FilterHints:     intent.FilterHints,
-		Filters:         filters,
-		SelectedColumns: selectedColumnsForMode(table, intent.Mode),
-		SQL:             buildSQLForIntent(table, intent, filters),
+		SourceTable:        table.TableName,
+		SourceFile:         table.SourceFile,
+		SourceSheet:        table.SourceSheet,
+		CandidateTables:    candidates,
+		PlanningConfidence: confidence,
+		SelectionReason:    reason,
+		Mode:               intent.Mode,
+		ChartType:          intent.ChartType,
+		DimensionColumn:    dimension,
+		MetricColumn:       metric,
+		TimeColumn:         timeColumn,
+		FilterHints:        intent.FilterHints,
+		Filters:            filters,
+		SelectedColumns:    selectedColumnsForMode(table, intent.Mode),
+		SQL:                buildSQLForIntent(table, intent, filters),
 	}
 }
 
-func choosePlanningTable(snapshot schemaSnapshot, question string) (tableSchema, []string) {
+func choosePlanningTable(snapshot schemaSnapshot, question string) (tableSchema, []string, float64, string) {
 	if len(snapshot.Tables) == 0 {
-		return tableSchema{}, nil
-	}
-
-	type scoredTable struct {
-		table tableSchema
-		score int
+		return tableSchema{}, nil, 0, "no imported tables available"
 	}
 
 	scored := make([]scoredTable, 0, len(snapshot.Tables))
@@ -108,7 +114,7 @@ func choosePlanningTable(snapshot schemaSnapshot, question string) (tableSchema,
 		}
 	}
 
-	return best.table, candidates
+	return best.table, candidates, planningConfidence(scored), selectionReason(scored)
 }
 
 func tableMatchScore(question string, table tableSchema) int {
@@ -195,6 +201,44 @@ func stripExtension(name string) string {
 		return name[:idx]
 	}
 	return name
+}
+
+func planningConfidence(scored []scoredTable) float64 {
+	if len(scored) == 0 {
+		return 0
+	}
+	best := scored[0].score
+	if best <= 0 {
+		return 0.25
+	}
+	if len(scored) == 1 {
+		return 1
+	}
+	second := scored[1].score
+	if second <= 0 {
+		return 1
+	}
+	confidence := float64(best-second) / float64(best)
+	if confidence < 0.2 {
+		return 0.35
+	}
+	if confidence > 1 {
+		return 1
+	}
+	return confidence
+}
+
+func selectionReason(scored []scoredTable) string {
+	if len(scored) == 0 {
+		return "no scoring candidates were available"
+	}
+	if len(scored) == 1 {
+		return "selected the only imported table"
+	}
+	if scored[0].score == scored[1].score {
+		return "selected the first table among equally scored candidates"
+	}
+	return "selected the highest-scoring table based on question, file, and column matches"
 }
 
 func buildSQLForIntent(table tableSchema, intent queryIntent, filters []plannedFilter) string {

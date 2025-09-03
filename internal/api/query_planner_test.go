@@ -46,6 +46,12 @@ func TestBuildSQLPlanCarriesStructuredSelections(t *testing.T) {
 	if len(plan.CandidateTables) != 1 || plan.CandidateTables[0] != "sales" {
 		t.Fatalf("expected candidate tables to include sales, got %#v", plan.CandidateTables)
 	}
+	if plan.PlanningConfidence <= 0 {
+		t.Fatalf("expected positive planner confidence, got %v", plan.PlanningConfidence)
+	}
+	if plan.SelectionReason == "" {
+		t.Fatalf("expected selection reason to be populated")
+	}
 	if plan.DimensionColumn != "category" {
 		t.Fatalf("expected dimension column category, got %q", plan.DimensionColumn)
 	}
@@ -100,6 +106,9 @@ func TestBuildSQLPlanSelectsBestMatchingTable(t *testing.T) {
 	}
 	if len(plan.CandidateTables) == 0 || plan.CandidateTables[0] != "customers" {
 		t.Fatalf("expected candidate tables to prioritize customers, got %#v", plan.CandidateTables)
+	}
+	if plan.PlanningConfidence < 0.35 {
+		t.Fatalf("expected meaningful planner confidence, got %v", plan.PlanningConfidence)
 	}
 	if !strings.Contains(plan.SQL, "FROM customers") {
 		t.Fatalf("expected SQL to target customers table, got %q", plan.SQL)
