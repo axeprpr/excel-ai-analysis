@@ -11,6 +11,76 @@ func OpenAPISpec() map[string]any {
 		"servers": []map[string]any{
 			{"url": "http://127.0.0.1:8080"},
 		},
+		"components": map[string]any{
+			"schemas": map[string]any{
+				"QueryResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"session_id": map[string]any{"type": "string"},
+						"question":   map[string]any{"type": "string"},
+						"sql":        map[string]any{"type": "string"},
+						"row_count":  map[string]any{"type": "integer"},
+						"executed":   map[string]any{"type": "boolean"},
+						"chart_mode": map[string]any{"type": "string", "enum": []string{"data", "mermaid", "mcp"}},
+						"summary":    map[string]any{"type": "string"},
+						"columns": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+						"rows": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "object"},
+						},
+						"warnings": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+						"query_plan": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"source_table":        map[string]any{"type": "string"},
+								"source_file":         map[string]any{"type": "string"},
+								"source_sheet":        map[string]any{"type": "string"},
+								"candidate_tables":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								"planning_confidence": map[string]any{"type": "number"},
+								"selection_reason":    map[string]any{"type": "string"},
+								"dimension_column":    map[string]any{"type": "string"},
+								"metric_column":       map[string]any{"type": "string"},
+								"time_column":         map[string]any{"type": "string"},
+								"selected_columns":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								"filters":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								"planned_filters": map[string]any{
+									"type": "array",
+									"items": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"column":   map[string]any{"type": "string"},
+											"operator": map[string]any{"type": "string"},
+											"value":    map[string]any{"type": "string"},
+										},
+									},
+								},
+								"question":   map[string]any{"type": "string"},
+								"chart_type": map[string]any{"type": "string"},
+								"mode":       map[string]any{"type": "string"},
+								"sql":        map[string]any{"type": "string"},
+							},
+						},
+						"chart": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"mode":     map[string]any{"type": "string"},
+								"executed": map[string]any{"type": "boolean"},
+								"url":      map[string]any{"type": "string"},
+								"endpoint": map[string]any{"type": "string"},
+								"tool":     map[string]any{"type": "string"},
+								"error":    map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		},
 		"paths": map[string]any{
 			"/api/chat/upload": map[string]any{
 				"post": map[string]any{
@@ -27,8 +97,8 @@ func OpenAPISpec() map[string]any {
 										"question":   map[string]any{"type": "string"},
 										"chart_mode": map[string]any{"type": "string", "enum": []string{"data", "mermaid", "mcp"}},
 										"file": map[string]any{
-											"type":   "array",
-											"items":  map[string]any{"type": "string", "format": "binary"},
+											"type":        "array",
+											"items":       map[string]any{"type": "string", "format": "binary"},
 											"description": "One or more uploaded spreadsheet files.",
 										},
 									},
@@ -37,7 +107,31 @@ func OpenAPISpec() map[string]any {
 						},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Import completed and optional answer returned."},
+						"200": map[string]any{
+							"description": "Import completed and optional answer returned.",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"session_id": map[string]any{"type": "string"},
+											"import": map[string]any{
+												"type": "object",
+												"properties": map[string]any{
+													"task_id":     map[string]any{"type": "string"},
+													"status":      map[string]any{"type": "string"},
+													"file_count":  map[string]any{"type": "integer"},
+													"table_count": map[string]any{"type": "integer"},
+												},
+											},
+											"answer": map[string]any{
+												"$ref": "#/components/schemas/QueryResponse",
+											},
+										},
+									},
+								},
+							},
+						},
 					},
 				},
 			},
@@ -50,7 +144,7 @@ func OpenAPISpec() map[string]any {
 						"content": map[string]any{
 							"application/json": map[string]any{
 								"schema": map[string]any{
-									"type": "object",
+									"type":     "object",
 									"required": []string{"session_id", "question"},
 									"properties": map[string]any{
 										"session_id": map[string]any{"type": "string"},
@@ -62,7 +156,16 @@ func OpenAPISpec() map[string]any {
 						},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Structured answer for the requested session."},
+						"200": map[string]any{
+							"description": "Structured answer for the requested session.",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": map[string]any{
+										"$ref": "#/components/schemas/QueryResponse",
+									},
+								},
+							},
+						},
 					},
 				},
 			},
@@ -157,7 +260,7 @@ func OpenAPISpec() map[string]any {
 						"content": map[string]any{
 							"application/json": map[string]any{
 								"schema": map[string]any{
-									"type": "object",
+									"type":     "object",
 									"required": []string{"question"},
 									"properties": map[string]any{
 										"question":   map[string]any{"type": "string"},
@@ -168,7 +271,16 @@ func OpenAPISpec() map[string]any {
 						},
 					},
 					"responses": map[string]any{
-						"200": map[string]any{"description": "Structured query response."},
+						"200": map[string]any{
+							"description": "Structured query response.",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": map[string]any{
+										"$ref": "#/components/schemas/QueryResponse",
+									},
+								},
+							},
+						},
 					},
 				},
 			},
