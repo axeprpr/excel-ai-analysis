@@ -446,6 +446,14 @@ func selectedColumnsForMode(table tableSchema, mode string) []string {
 		if firstTimeColumn(table) != "" && metric != "" {
 			return []string{"time_bucket", "total_value"}
 		}
+	case "share":
+		if dimension != "" && metric != "" {
+			return []string{dimension, "share_value"}
+		}
+	case "compare":
+		if dimension != "" && metric != "" {
+			return []string{dimension, "total_value"}
+		}
 	case "topn":
 		if dimension != "" && metric != "" {
 			return []string{dimension, "total_value"}
@@ -601,7 +609,7 @@ func pickVisualizationSeries(plan queryPlan, snapshot schemaSnapshot) []string {
 
 func preferredVisualizationFormat(plan queryPlan) string {
 	switch plan.Mode {
-	case "trend", "topn", "aggregate", "count":
+	case "trend", "topn", "aggregate", "count", "share", "compare":
 		return "chart"
 	default:
 		return "table"

@@ -23,9 +23,12 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 
 	if hasAny(q, "同比", "环比", "compare", "comparison", "versus", "vs", "对比") {
 		intent.Comparison = true
+		intent.Mode = "compare"
+		intent.ChartType = "bar"
 	}
 	if hasAny(q, "占比", "比例", "share", "distribution", "composition") {
 		intent.Share = true
+		intent.Mode = "share"
 		intent.ChartType = "pie"
 	}
 	if hasAny(q, "top", "rank", "highest", "排名", "最高", "最多", "lowest", "最低") {
@@ -55,16 +58,12 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 		intent.TimeGranularity = "year"
 	}
 
-	if intent.Mode == "detail" && intent.Share {
-		intent.Mode = "aggregate"
-	}
-
 	return intent
 }
 
 func normalizeIntentMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "detail", "aggregate", "topn", "trend", "count":
+	case "detail", "aggregate", "topn", "trend", "count", "share", "compare":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return ""

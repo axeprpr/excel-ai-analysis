@@ -21,7 +21,8 @@ func TestDetectQueryIntent(t *testing.T) {
 		{"show sales trend by month", "trend", "line", false},
 		{"top categories by revenue", "topn", "bar", false},
 		{"count rows this month", "count", "table", true},
-		{"show category share", "aggregate", "pie", false},
+		{"show category share", "share", "pie", false},
+		{"compare category revenue", "compare", "bar", false},
 		{"detail rows for east", "detail", "table", true},
 	}
 

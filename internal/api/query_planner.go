@@ -254,6 +254,16 @@ func buildSQLForIntent(table tableSchema, intent queryIntent, filters []plannedF
 		if timeColumn != "" && metric != "" {
 			return buildTrendSQL(table.TableName, timeColumn, metric, intent.TimeGranularity, whereClause)
 		}
+	case "share":
+		if dimension != "" && metric != "" {
+			return "SELECT " + dimension + ", ROUND(100.0 * SUM(" + metric + ") / SUM(SUM(" + metric + ")) OVER (), 2) AS share_value FROM " + table.TableName +
+				whereClause + " GROUP BY " + dimension + " ORDER BY share_value DESC LIMIT 20;"
+		}
+	case "compare":
+		if dimension != "" && metric != "" {
+			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +
+				whereClause + " GROUP BY " + dimension + " ORDER BY " + dimension + " ASC LIMIT 20;"
+		}
 	case "topn":
 		if dimension != "" && metric != "" {
 			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +

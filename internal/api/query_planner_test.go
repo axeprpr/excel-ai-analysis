@@ -114,3 +114,37 @@ func TestBuildSQLPlanSelectsBestMatchingTable(t *testing.T) {
 		t.Fatalf("expected SQL to target customers table, got %q", plan.SQL)
 	}
 }
+
+func TestBuildSQLPlanSupportsShareAndComparisonModes(t *testing.T) {
+	table := tableSchema{
+		TableName:   "sales",
+		SourceFile:  "sales.csv",
+		SourceSheet: "Sheet1",
+		Columns: []schemaColumn{
+			{Name: "category", Type: "TEXT", Semantic: "dimension"},
+			{Name: "amount", Type: "REAL", Semantic: "metric"},
+		},
+	}
+	snapshot := schemaSnapshot{Tables: []tableSchema{table}}
+
+	shareIntent := detectQueryIntent("show category share", table)
+	sharePlan := buildSQLPlan(snapshot, "show category share", shareIntent)
+	if sharePlan.Mode != "share" {
+		t.Fatalf("expected share mode, got %q", sharePlan.Mode)
+	}
+	if !strings.Contains(sharePlan.SQL, "share_value") {
+		t.Fatalf("expected share sql to expose share_value, got %q", sharePlan.SQL)
+	}
+
+	compareIntent := detectQueryIntent("compare category revenue", table)
+	comparePlan := buildSQLPlan(snapshot, "compare category revenue", compareIntent)
+	if comparePlan.Mode != "compare" {
+		t.Fatalf("expected compare mode, got %q", comparePlan.Mode)
+	}
+	if !strings.Contains(comparePlan.SQL, "GROUP BY category") {
+		t.Fatalf("expected compare sql to group by category, got %q", comparePlan.SQL)
+	}
+	if !strings.Contains(comparePlan.SQL, "total_value") {
+		t.Fatalf("expected compare sql to expose total_value, got %q", comparePlan.SQL)
+	}
+}
