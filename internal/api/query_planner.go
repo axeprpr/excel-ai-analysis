@@ -124,6 +124,7 @@ func tableMatchScore(question string, table tableSchema) int {
 	score += countTokenMatches(normalizedQuestion, normalizeNameTokens(table.TableName)) * 5
 	score += countTokenMatches(normalizedQuestion, normalizeNameTokens(stripExtension(table.SourceFile))) * 4
 	score += countTokenMatches(normalizedQuestion, normalizeNameTokens(table.SourceSheet)) * 2
+	score += businessConceptScore(normalizedQuestion, table) * 3
 
 	for _, column := range table.Columns {
 		columnWeight := 1
@@ -140,6 +141,57 @@ func tableMatchScore(question string, table tableSchema) int {
 	}
 
 	return score
+}
+
+func businessConceptScore(question string, table tableSchema) int {
+	score := 0
+	for _, concept := range businessConcepts() {
+		if !containsAny(question, concept.QuestionTerms) {
+			continue
+		}
+		if containsAny(strings.ToLower(table.TableName), concept.TableTerms) ||
+			containsAny(strings.ToLower(stripExtension(table.SourceFile)), concept.TableTerms) {
+			score += 3
+		}
+		for _, column := range table.Columns {
+			columnName := strings.ToLower(column.Name)
+			if containsAny(columnName, concept.ColumnTerms) {
+				score += 2
+			}
+		}
+	}
+	return score
+}
+
+type businessConcept struct {
+	QuestionTerms []string
+	TableTerms    []string
+	ColumnTerms   []string
+}
+
+func businessConcepts() []businessConcept {
+	return []businessConcept{
+		{
+			QuestionTerms: []string{"sales", "revenue", "gmv", "成交额", "销售额", "营收"},
+			TableTerms:    []string{"sales", "revenue", "orders", "transactions"},
+			ColumnTerms:   []string{"amount", "revenue", "gmv", "sales", "price", "total"},
+		},
+		{
+			QuestionTerms: []string{"customer", "customers", "user", "users", "客户", "用户"},
+			TableTerms:    []string{"customer", "customers", "user", "users", "accounts"},
+			ColumnTerms:   []string{"customer", "user", "account", "member"},
+		},
+		{
+			QuestionTerms: []string{"order", "orders", "订单"},
+			TableTerms:    []string{"order", "orders", "sales", "transactions"},
+			ColumnTerms:   []string{"order", "amount", "transaction"},
+		},
+		{
+			QuestionTerms: []string{"product", "products", "sku", "商品", "产品"},
+			TableTerms:    []string{"product", "products", "catalog", "inventory"},
+			ColumnTerms:   []string{"product", "sku", "category", "brand"},
+		},
+	}
 }
 
 func semanticHintMatches(question, semantic string) bool {
@@ -181,6 +233,15 @@ func countTokenMatches(question string, tokens []string) int {
 		}
 	}
 	return matches
+}
+
+func containsAny(text string, keywords []string) bool {
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeNameTokens(value string) []string {

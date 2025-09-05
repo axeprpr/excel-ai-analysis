@@ -148,3 +148,42 @@ func TestBuildSQLPlanSupportsShareAndComparisonModes(t *testing.T) {
 		t.Fatalf("expected compare sql to expose total_value, got %q", comparePlan.SQL)
 	}
 }
+
+func TestBuildSQLPlanUsesBusinessConceptSynonyms(t *testing.T) {
+	snapshot := schemaSnapshot{
+		Tables: []tableSchema{
+			{
+				TableName:   "transactions",
+				SourceFile:  "transactions.csv",
+				SourceSheet: "Sheet1",
+				Columns: []schemaColumn{
+					{Name: "created_at", Type: "DATE", Semantic: "time"},
+					{Name: "region", Type: "TEXT", Semantic: "dimension"},
+					{Name: "gmv", Type: "REAL", Semantic: "metric"},
+				},
+			},
+			{
+				TableName:   "customers",
+				SourceFile:  "customers.csv",
+				SourceSheet: "Sheet1",
+				Columns: []schemaColumn{
+					{Name: "created_at", Type: "DATE", Semantic: "time"},
+					{Name: "customer_name", Type: "TEXT", Semantic: "dimension"},
+					{Name: "customer_count", Type: "INTEGER", Semantic: "metric"},
+				},
+			},
+		},
+	}
+
+	intent := detectQueryIntent("show gmv trend by month", snapshot.Tables[0])
+	plan := buildSQLPlan(snapshot, "show gmv trend by month", intent)
+	if plan.SourceTable != "transactions" {
+		t.Fatalf("expected gmv query to select transactions, got %q", plan.SourceTable)
+	}
+
+	intent = detectQueryIntent("show customer trend by month", snapshot.Tables[0])
+	plan = buildSQLPlan(snapshot, "show customer trend by month", intent)
+	if plan.SourceTable != "customers" {
+		t.Fatalf("expected customer query to select customers, got %q", plan.SourceTable)
+	}
+}
