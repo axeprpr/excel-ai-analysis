@@ -1252,6 +1252,96 @@ func TestXLSXUploadImportsRowsIntoSQLite(t *testing.T) {
 	}
 }
 
+func TestXLSXUploadImportsMultipleSheetsIntoSQLite(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	workbook := excelize.NewFile()
+	workbook.SetCellValue("Sheet1", "A1", "order_date")
+	workbook.SetCellValue("Sheet1", "B1", "amount")
+	workbook.SetCellValue("Sheet1", "A2", "2025-01-01")
+	workbook.SetCellValue("Sheet1", "B2", 10)
+	reportSheet := "Customers"
+	if _, err := workbook.NewSheet(reportSheet); err != nil {
+		t.Fatalf("failed to create second sheet: %v", err)
+	}
+	workbook.SetCellValue(reportSheet, "A1", "customer_name")
+	workbook.SetCellValue(reportSheet, "B1", "region")
+	workbook.SetCellValue(reportSheet, "A2", "Alice")
+	workbook.SetCellValue(reportSheet, "B2", "east")
+
+	var xlsx bytes.Buffer
+	if err := workbook.Write(&xlsx); err != nil {
+		t.Fatalf("failed to write xlsx workbook: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(xlsx.Bytes()); err != nil {
+		t.Fatalf("failed to write xlsx bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	mainRows, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to count primary xlsx rows: %v", err)
+	}
+	if string(bytes.TrimSpace(mainRows)) != "1" {
+		t.Fatalf("expected 1 imported row in sales, got %q", string(bytes.TrimSpace(mainRows)))
+	}
+
+	secondaryRows, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales_customers";`)
+	if err != nil {
+		t.Fatalf("failed to count secondary xlsx sheet rows: %v", err)
+	}
+	if string(bytes.TrimSpace(secondaryRows)) != "1" {
+		t.Fatalf("expected 1 imported row in sales_customers, got %q", string(bytes.TrimSpace(secondaryRows)))
+	}
+}
+
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 	var lastErr error
 	for i := 0; i < 5; i++ {

@@ -2,8 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -53,43 +53,47 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 		tableName := deriveTableName(fileName)
 		filePath := filepath.Join(sessionDir, "uploads", fileName)
 
-		var schema tableSchema
+		var fileSchemas []tableSchema
 		switch strings.ToLower(filepath.Ext(fileName)) {
 		case ".csv":
+			var schema tableSchema
 			schema, err = importCSVIntoSQLite(meta.DatabasePath, filePath, tableName)
 			if err != nil {
 				markTaskFailed(sessionDir, task, "failed to import csv into sqlite")
 				return
 			}
+			fileSchemas = []tableSchema{schema}
 		case ".xlsx":
-			schema, err = importXLSXIntoSQLite(meta.DatabasePath, filePath, tableName)
+			fileSchemas, err = importXLSXIntoSQLite(meta.DatabasePath, filePath, tableName)
 			if err != nil {
-				schema = tableSchema{
+				fileSchemas = []tableSchema{{
 					TableName:   tableName,
 					SourceFile:  fileName,
 					SourceSheet: "sheet1",
 					Columns:     derivePlaceholderColumns(fileName),
-				}
-				if err := createPlaceholderSQLiteTable(meta.DatabasePath, schema); err != nil {
+				}}
+				if err := createPlaceholderSQLiteTable(meta.DatabasePath, fileSchemas[0]); err != nil {
 					markTaskFailed(sessionDir, task, "failed to create placeholder sqlite table")
 					return
 				}
 			}
 		default:
-			schema = tableSchema{
+			fileSchemas = []tableSchema{{
 				TableName:   tableName,
 				SourceFile:  fileName,
 				SourceSheet: "sheet1",
 				Columns:     derivePlaceholderColumns(fileName),
-			}
-			if err := createPlaceholderSQLiteTable(meta.DatabasePath, schema); err != nil {
+			}}
+			if err := createPlaceholderSQLiteTable(meta.DatabasePath, fileSchemas[0]); err != nil {
 				markTaskFailed(sessionDir, task, "failed to create placeholder sqlite table")
 				return
 			}
 		}
 
-		tables = append(tables, tableName)
-		schemas = append(schemas, schema)
+		for _, schema := range fileSchemas {
+			tables = append(tables, schema.TableName)
+			schemas = append(schemas, schema)
+		}
 	}
 
 	if err := writeSchemaSnapshot(sessionDir, schemas); err != nil {
