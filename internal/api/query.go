@@ -451,6 +451,9 @@ func selectedColumnsForMode(table tableSchema, mode string) []string {
 			return []string{dimension, "share_value"}
 		}
 	case "compare":
+		if firstTimeColumn(table) != "" && metric != "" {
+			return []string{"compare_period", "total_value"}
+		}
 		if dimension != "" && metric != "" {
 			return []string{dimension, "total_value"}
 		}

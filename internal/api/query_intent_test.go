@@ -13,17 +13,20 @@ func TestDetectQueryIntent(t *testing.T) {
 	}
 
 	cases := []struct {
-		question   string
-		wantMode   string
-		wantChart  string
-		wantFilter bool
+		question        string
+		wantMode        string
+		wantChart       string
+		wantFilter      bool
+		wantCompareType string
 	}{
-		{"show sales trend by month", "trend", "line", false},
-		{"top categories by revenue", "topn", "bar", false},
-		{"count rows this month", "count", "table", true},
-		{"show category share", "share", "pie", false},
-		{"compare category revenue", "compare", "bar", false},
-		{"detail rows for east", "detail", "table", true},
+		{"show sales trend by month", "trend", "line", false, ""},
+		{"top categories by revenue", "topn", "bar", false, ""},
+		{"count rows this month", "count", "table", true, ""},
+		{"show category share", "share", "pie", false, ""},
+		{"compare category revenue", "compare", "bar", false, ""},
+		{"同比销售额", "compare", "line", false, "yoy"},
+		{"mom revenue", "compare", "line", false, "mom"},
+		{"detail rows for east", "detail", "table", true, ""},
 	}
 
 	for _, tc := range cases {
@@ -36,6 +39,9 @@ func TestDetectQueryIntent(t *testing.T) {
 		}
 		if tc.wantFilter && len(intent.FilterHints) == 0 {
 			t.Fatalf("question %q: expected filter hints", tc.question)
+		}
+		if intent.ComparisonType != tc.wantCompareType {
+			t.Fatalf("question %q: expected comparison type %q, got %q", tc.question, tc.wantCompareType, intent.ComparisonType)
 		}
 	}
 }

@@ -121,6 +121,7 @@ func TestBuildSQLPlanSupportsShareAndComparisonModes(t *testing.T) {
 		SourceFile:  "sales.csv",
 		SourceSheet: "Sheet1",
 		Columns: []schemaColumn{
+			{Name: "order_date", Type: "DATE", Semantic: "time"},
 			{Name: "category", Type: "TEXT", Semantic: "dimension"},
 			{Name: "amount", Type: "REAL", Semantic: "metric"},
 		},
@@ -146,6 +147,24 @@ func TestBuildSQLPlanSupportsShareAndComparisonModes(t *testing.T) {
 	}
 	if !strings.Contains(comparePlan.SQL, "total_value") {
 		t.Fatalf("expected compare sql to expose total_value, got %q", comparePlan.SQL)
+	}
+
+	yoyIntent := detectQueryIntent("同比销售额", table)
+	yoyPlan := buildSQLPlan(snapshot, "同比销售额", yoyIntent)
+	if yoyIntent.ComparisonType != "yoy" {
+		t.Fatalf("expected yoy comparison type, got %q", yoyIntent.ComparisonType)
+	}
+	if !strings.Contains(yoyPlan.SQL, "compare_period") || !strings.Contains(yoyPlan.SQL, "substr(order_date, 1, 4)") {
+		t.Fatalf("expected yoy sql to bucket by year, got %q", yoyPlan.SQL)
+	}
+
+	momIntent := detectQueryIntent("mom revenue", table)
+	momPlan := buildSQLPlan(snapshot, "mom revenue", momIntent)
+	if momIntent.ComparisonType != "mom" {
+		t.Fatalf("expected mom comparison type, got %q", momIntent.ComparisonType)
+	}
+	if !strings.Contains(momPlan.SQL, "compare_period") || !strings.Contains(momPlan.SQL, "substr(order_date, 1, 7)") {
+		t.Fatalf("expected mom sql to bucket by month, got %q", momPlan.SQL)
 	}
 }
 

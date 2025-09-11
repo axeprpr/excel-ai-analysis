@@ -7,6 +7,7 @@ type queryIntent struct {
 	ChartType        string
 	TimeGranularity  string
 	Comparison       bool
+	ComparisonType   string
 	Share            bool
 	Ranking          bool
 	HasTimeReference bool
@@ -25,6 +26,26 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 		intent.Comparison = true
 		intent.Mode = "compare"
 		intent.ChartType = "bar"
+	}
+	if hasAny(q, "同比", "yoy", "year over year") {
+		intent.Comparison = true
+		intent.ComparisonType = "yoy"
+		intent.Mode = "compare"
+		intent.ChartType = "line"
+		intent.HasTimeReference = true
+		if intent.TimeGranularity == "" {
+			intent.TimeGranularity = "year"
+		}
+	}
+	if hasAny(q, "环比", "mom", "month over month") {
+		intent.Comparison = true
+		intent.ComparisonType = "mom"
+		intent.Mode = "compare"
+		intent.ChartType = "line"
+		intent.HasTimeReference = true
+		if intent.TimeGranularity == "" {
+			intent.TimeGranularity = "month"
+		}
 	}
 	if hasAny(q, "占比", "比例", "share", "distribution", "composition") {
 		intent.Share = true

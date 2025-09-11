@@ -321,6 +321,9 @@ func buildSQLForIntent(table tableSchema, intent queryIntent, filters []plannedF
 				whereClause + " GROUP BY " + dimension + " ORDER BY share_value DESC LIMIT 20;"
 		}
 	case "compare":
+		if timeColumn := firstTimeColumn(table); intent.ComparisonType != "" && timeColumn != "" && metric != "" {
+			return buildTimeComparisonSQL(table.TableName, timeColumn, metric, intent.ComparisonType, whereClause)
+		}
 		if dimension != "" && metric != "" {
 			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +
 				whereClause + " GROUP BY " + dimension + " ORDER BY " + dimension + " ASC LIMIT 20;"
@@ -340,6 +343,20 @@ func buildSQLForIntent(table tableSchema, intent queryIntent, filters []plannedF
 		return "SELECT " + dimension + ", " + metric + " FROM " + table.TableName + whereClause + " LIMIT 100;"
 	}
 	return buildPlaceholderSQL(schemaSnapshot{Tables: []tableSchema{table}})
+}
+
+func buildTimeComparisonSQL(tableName, timeColumn, metric, comparisonType, whereClause string) string {
+	switch comparisonType {
+	case "yoy":
+		return "SELECT substr(" + timeColumn + ", 1, 4) AS compare_period, SUM(" + metric + ") AS total_value FROM " + tableName +
+			whereClause + " GROUP BY compare_period ORDER BY compare_period ASC;"
+	case "mom":
+		return "SELECT substr(" + timeColumn + ", 1, 7) AS compare_period, SUM(" + metric + ") AS total_value FROM " + tableName +
+			whereClause + " GROUP BY compare_period ORDER BY compare_period ASC;"
+	default:
+		return "SELECT substr(" + timeColumn + ", 1, 7) AS compare_period, SUM(" + metric + ") AS total_value FROM " + tableName +
+			whereClause + " GROUP BY compare_period ORDER BY compare_period ASC;"
+	}
 }
 
 func buildTrendSQL(tableName, timeColumn, metric, granularity, whereClause string) string {
