@@ -12,6 +12,9 @@ func TestShouldRetryWithHeuristicPlan(t *testing.T) {
 	if !shouldRetryWithHeuristicPlan(plannerWarnings, result) {
 		t.Fatalf("expected heuristic retry to be enabled for repairable LLM SQL errors")
 	}
+	if !shouldRetryLLMRepair(plannerWarnings, result) {
+		t.Fatalf("expected llm repair retry to be enabled for repairable LLM SQL errors")
+	}
 }
 
 func TestShouldNotRetryWithoutLLMWarning(t *testing.T) {
@@ -22,6 +25,9 @@ func TestShouldNotRetryWithoutLLMWarning(t *testing.T) {
 
 	if shouldRetryWithHeuristicPlan(nil, result) {
 		t.Fatalf("expected heuristic retry to stay disabled without LLM-generated SQL")
+	}
+	if shouldRetryLLMRepair(nil, result) {
+		t.Fatalf("expected llm repair retry to stay disabled without LLM-generated SQL")
 	}
 }
 
@@ -34,5 +40,8 @@ func TestShouldNotRetryForNonRepairableErrors(t *testing.T) {
 
 	if shouldRetryWithHeuristicPlan(plannerWarnings, result) {
 		t.Fatalf("expected heuristic retry to stay disabled for non-repairable errors")
+	}
+	if shouldRetryLLMRepair(plannerWarnings, result) {
+		t.Fatalf("expected llm repair retry to stay disabled for non-repairable errors")
 	}
 }

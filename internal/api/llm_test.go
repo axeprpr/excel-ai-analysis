@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,24 @@ func TestBuildQueryPlanWithFallbackRejectsUnsafeLLMSQL(t *testing.T) {
 	}
 	if len(warnings) == 0 {
 		t.Fatalf("expected fallback warning when llm request fails")
+	}
+}
+
+func TestBuildLLMSQLPromptIncludesRepairContext(t *testing.T) {
+	prompt := buildLLMSQLPrompt(llmSQLRequest{
+		Question:       "show sales by category",
+		Schema:         schemaSnapshot{Tables: []tableSchema{{TableName: "sales"}}},
+		FailedSQL:      "SELECT revenue_total FROM sales;",
+		ExecutionError: "no such column: revenue_total",
+	})
+
+	if !strings.Contains(prompt, "Previous SQL Attempt") {
+		t.Fatalf("expected repair prompt to include previous sql")
+	}
+	if !strings.Contains(prompt, "Execution Error") {
+		t.Fatalf("expected repair prompt to include execution error")
+	}
+	if !strings.Contains(prompt, "Repair the SQL for SQLite") {
+		t.Fatalf("expected repair prompt to request sql repair")
 	}
 }

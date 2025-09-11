@@ -10,8 +10,10 @@ import (
 )
 
 type llmSQLRequest struct {
-	Question string         `json:"question"`
-	Schema   schemaSnapshot `json:"schema"`
+	Question       string         `json:"question"`
+	Schema         schemaSnapshot `json:"schema"`
+	FailedSQL      string         `json:"failed_sql,omitempty"`
+	ExecutionError string         `json:"execution_error,omitempty"`
 }
 
 type llmSQLResponse struct {
@@ -68,7 +70,7 @@ func (h *Handler) generateSQLWithOpenAICompatible(settings modelSettings, req ll
 					"Only generate SELECT statements.",
 			},
 			{
-				Role: "user",
+				Role:    "user",
 				Content: buildLLMSQLPrompt(req),
 			},
 		},
@@ -123,5 +125,11 @@ func (h *Handler) generateSQLWithOpenAICompatible(settings modelSettings, req ll
 
 func buildLLMSQLPrompt(req llmSQLRequest) string {
 	schemaJSON, _ := json.Marshal(req.Schema)
-	return "Question:\n" + req.Question + "\n\nSchema:\n" + string(schemaJSON)
+	prompt := "Question:\n" + req.Question + "\n\nSchema:\n" + string(schemaJSON)
+	if strings.TrimSpace(req.FailedSQL) != "" || strings.TrimSpace(req.ExecutionError) != "" {
+		prompt += "\n\nPrevious SQL Attempt:\n" + req.FailedSQL
+		prompt += "\n\nExecution Error:\n" + req.ExecutionError
+		prompt += "\n\nRepair the SQL for SQLite and keep it read-only."
+	}
+	return prompt
 }
