@@ -62,8 +62,11 @@ func OpenAPISpec() map[string]any {
 								},
 								"question":   map[string]any{"type": "string"},
 								"chart_type": map[string]any{"type": "string"},
-								"mode":       map[string]any{"type": "string"},
-								"sql":        map[string]any{"type": "string"},
+								"mode": map[string]any{
+									"type": "string",
+									"enum": []string{"detail", "aggregate", "topn", "trend", "count", "share", "compare"},
+								},
+								"sql": map[string]any{"type": "string"},
 							},
 						},
 						"chart": map[string]any{
@@ -86,6 +89,7 @@ func OpenAPISpec() map[string]any {
 				"post": map[string]any{
 					"summary":     "Upload spreadsheet files and auto-create a session when needed",
 					"operationId": "chatUpload",
+					"description": "Creates a session when session_id is omitted, imports uploaded files, and optionally answers the provided question in the same request.",
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
@@ -139,6 +143,7 @@ func OpenAPISpec() map[string]any {
 				"post": map[string]any{
 					"summary":     "Query an existing session",
 					"operationId": "chatQuery",
+					"description": "Runs natural-language analysis against an existing session-local SQLite database. The service may use an OpenAI-compatible LLM for SQL planning and repair before falling back to the built-in planner.",
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
@@ -252,6 +257,7 @@ func OpenAPISpec() map[string]any {
 				"post": map[string]any{
 					"summary":     "Query a ready session",
 					"operationId": "querySession",
+					"description": "Returns structured query output including planner diagnostics, warnings, SQL, rows, visualization metadata, and chart output.",
 					"parameters": []map[string]any{
 						pathParam("session_id", "Session identifier."),
 					},
