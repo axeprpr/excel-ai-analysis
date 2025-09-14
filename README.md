@@ -42,7 +42,8 @@ Implemented today:
 - one local `SQLite` database per session
 - local file upload and import task tracking
 - real `.csv` import into SQLite
-- minimal real `.xlsx` import into SQLite
+- real `.xlsx` import into SQLite with one SQLite table per non-empty sheet
+- batched `.xlsx` row insertion to reduce large-sheet memory pressure
 - placeholder `.xls` handling with explicit warnings
 - schema catalog persistence in:
   - JSON files
@@ -55,6 +56,18 @@ Implemented today:
   - `topn`
   - `trend`
   - `count`
+  - `share`
+  - `compare`
+  - `year-over-year` compare planning
+  - `month-over-month` compare planning
+- planner diagnostics:
+  - candidate table selection
+  - planning confidence
+  - selection reason
+  - structured filter planning
+- business-term table scoring for concepts such as `gmv`, `revenue`, `customer`, `order`, and `product`
+- OpenAI-compatible SQL planning path
+- LLM SQL repair retry using the SQLite execution error before heuristic fallback
 - chart output modes:
   - `data`
   - `mermaid`
@@ -70,11 +83,12 @@ Implemented today:
 Current limits:
 
 - `.csv` is the strongest import path
-- `.xlsx` is intentionally minimal, not full workbook coverage
+- `.xlsx` now supports multi-sheet import, but it is still not a full enterprise workbook pipeline for formula-heavy files, type-rich formatting, or massive heterogeneous workbooks
 - invalid `.xlsx` files fall back to placeholder schema scaffolding
 - `.xls` is not truly parsed yet
-- AI text-to-SQL is still heuristic and local-rule based
-- the LLM-backed SQL planning path is experimental and falls back to the local planner on provider errors or unsafe SQL
+- AI text-to-SQL is now a hybrid of local planner rules and optional OpenAI-compatible SQL generation, but it still lacks join planning and deeper semantic reasoning
+- the LLM-backed SQL path now includes one repair retry using the SQLite execution error, but it is still not a full multi-step autonomous SQL repair loop
+- compare mode supports grouped compare plus basic `yoy` and `mom` time-bucket compare, but does not yet produce richer enterprise-style delta/percentage-delta outputs
 - chart MCP execution depends on a reachable local `mcp_server_url` and a supported chart shape
 
 ## Architecture
