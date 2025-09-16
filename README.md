@@ -91,6 +91,33 @@ Current limits:
 - compare mode supports grouped compare plus basic `yoy` and `mom` time-bucket compare, but does not yet produce richer enterprise-style delta/percentage-delta outputs
 - chart MCP execution depends on a reachable local `mcp_server_url` and a supported chart shape
 
+## File Support Matrix
+
+Current import support is intentionally explicit:
+
+- `.csv`
+  - support level: `full`
+  - best-supported path
+  - expects a single structured table with the first row as headers
+- `.xlsx`
+  - support level: `partial`
+  - supports one SQLite table per non-empty sheet
+  - expects structured sheets with the first row as headers
+  - does not guarantee correct handling for merged cells, multiple tables inside one sheet, heavy formatting, or formula-driven workbook layouts
+- `.xls`
+  - support level: `placeholder`
+  - accepted by the API for flow compatibility
+  - not truly parsed yet
+  - currently produces placeholder schema and warnings
+
+The upload and import APIs now return:
+
+- `support_level`
+- `warning_codes`
+- `warnings`
+
+This is the recommended contract for upstream systems such as Dify or other agents when deciding whether to trust a result directly, prompt the user to clean the workbook, or fall back to a safer path.
+
 ## Architecture
 
 The repository currently runs as a local multi-service stack:
