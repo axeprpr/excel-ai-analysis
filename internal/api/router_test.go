@@ -267,6 +267,13 @@ func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
 	if !ok || len(warnings) == 0 {
 		t.Fatalf("expected upload response warnings for xls import, got %v", uploadResp["warnings"])
 	}
+	if uploadResp["support_level"] != "placeholder" {
+		t.Fatalf("expected xls upload support_level to be placeholder, got %v", uploadResp["support_level"])
+	}
+	warningCodes, ok := uploadResp["warning_codes"].([]any)
+	if !ok || len(warningCodes) == 0 {
+		t.Fatalf("expected upload response warning_codes for xls import, got %v", uploadResp["warning_codes"])
+	}
 
 	taskID, _ := uploadResp["task_id"].(string)
 	if taskID == "" {
@@ -301,6 +308,12 @@ func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
 	taskWarnings, ok := importResp["warnings"].([]any)
 	if !ok || len(taskWarnings) == 0 {
 		t.Fatalf("expected import task warnings for xls import, got %v", importResp["warnings"])
+	}
+	if importResp["support_level"] != "placeholder" {
+		t.Fatalf("expected import support_level to be placeholder, got %v", importResp["support_level"])
+	}
+	if taskWarningCodes, ok := importResp["warning_codes"].([]any); !ok || len(taskWarningCodes) == 0 {
+		t.Fatalf("expected import task warning_codes for xls import, got %v", importResp["warning_codes"])
 	}
 	if importResp["warning_count"] != float64(1) {
 		t.Fatalf("expected import warning_count to be 1, got %v", importResp["warning_count"])
@@ -1234,6 +1247,9 @@ func TestXLSXUploadImportsRowsIntoSQLite(t *testing.T) {
 	var uploadResp map[string]any
 	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
 		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	if uploadResp["support_level"] != "partial" {
+		t.Fatalf("expected xlsx upload support_level to be partial, got %v", uploadResp["support_level"])
 	}
 	taskID, _ := uploadResp["task_id"].(string)
 	if taskID == "" {

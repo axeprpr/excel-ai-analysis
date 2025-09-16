@@ -17,18 +17,20 @@ import (
 )
 
 type importTask struct {
-	TaskID     string     `json:"task_id"`
-	SessionID  string     `json:"session_id"`
-	Type       string     `json:"type"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	Error      string     `json:"error,omitempty"`
-	FileCount  int        `json:"file_count"`
-	FileNames  []string   `json:"file_names"`
-	Warnings   []string   `json:"warnings,omitempty"`
+	TaskID       string     `json:"task_id"`
+	SessionID    string     `json:"session_id"`
+	Type         string     `json:"type"`
+	Status       string     `json:"status"`
+	CreatedAt    time.Time  `json:"created_at"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	Error        string     `json:"error,omitempty"`
+	FileCount    int        `json:"file_count"`
+	FileNames    []string   `json:"file_names"`
+	SupportLevel string     `json:"support_level,omitempty"`
+	WarningCodes []string   `json:"warning_codes,omitempty"`
+	Warnings     []string   `json:"warnings,omitempty"`
 }
 
 type uploadedFileInfo struct {
@@ -77,6 +79,8 @@ func (h *Handler) handleSessionUpload(w http.ResponseWriter, r *http.Request) {
 		"file_count":     len(task.FileNames),
 		"file_names":     task.FileNames,
 		"files":          savedFiles,
+		"support_level":  task.SupportLevel,
+		"warning_codes":  task.WarningCodes,
 		"warnings":       task.Warnings,
 		"created_at":     task.CreatedAt,
 	})
@@ -144,16 +148,19 @@ func writeImportTask(sessionDir, sessionID string, fileNames []string, now time.
 		return importTask{}, err
 	}
 
+	supportLevel, warningCodes, warnings := buildImportWarnings(fileNames)
 	task := importTask{
-		TaskID:    taskID,
-		SessionID: sessionID,
-		Type:      "import",
-		Status:    "pending",
-		CreatedAt: now,
-		UpdatedAt: now,
-		FileCount: len(fileNames),
-		FileNames: fileNames,
-		Warnings:  buildImportWarnings(fileNames),
+		TaskID:       taskID,
+		SessionID:    sessionID,
+		Type:         "import",
+		Status:       "pending",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		FileCount:    len(fileNames),
+		FileNames:    fileNames,
+		SupportLevel: supportLevel,
+		WarningCodes: warningCodes,
+		Warnings:     warnings,
 	}
 
 	importDir := filepath.Join(sessionDir, "imports")
@@ -234,15 +241,46 @@ func isSupportedUploadFile(name string) bool {
 	}
 }
 
-func buildImportWarnings(fileNames []string) []string {
-	warnings := make([]string, 0, 1)
+func buildImportWarnings(fileNames []string) (string, []string, []string) {
+	supportLevel := "full"
+	warningCodes := make([]string, 0, 2)
+	warnings := make([]string, 0, 2)
+
 	for _, name := range fileNames {
-		if strings.EqualFold(filepath.Ext(name), ".xls") {
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".xls":
+			supportLevel = "placeholder"
+			warningCodes = append(warningCodes, "legacy_xls_placeholder")
 			warnings = append(warnings, ".xls files currently use placeholder import; real parsing is only implemented for .csv and .xlsx.")
-			break
+		case ".xlsx":
+			if supportLevel == "full" {
+				supportLevel = "partial"
+			}
+			warningCodes = append(warningCodes, "xlsx_structured_tables_only")
+			warnings = append(warnings, ".xlsx import currently expects structured sheets with the first row as headers; complex layouts, merged cells, and multi-table sheets are not fully supported.")
 		}
 	}
-	return warnings
+
+	if len(warningCodes) == 0 {
+		warningCodes = []string{}
+	}
+	if len(warnings) == 0 {
+		warnings = []string{}
+	}
+	return supportLevel, dedupeStrings(warningCodes), dedupeStrings(warnings)
+}
+
+func dedupeStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func syncImportTaskToDatabase(databasePath string, task importTask) error {

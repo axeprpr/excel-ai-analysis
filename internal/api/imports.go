@@ -40,11 +40,11 @@ func (h *Handler) handleImports(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":     sessionID,
-		"session_status": meta.Status,
-		"tasks":          buildImportTaskResponses(tasks),
-		"task_count":     len(tasks),
-		"status_counts":  importTaskStatusCounts(tasks),
+		"session_id":          sessionID,
+		"session_status":      meta.Status,
+		"tasks":               buildImportTaskResponses(tasks),
+		"task_count":          len(tasks),
+		"status_counts":       importTaskStatusCounts(tasks),
 		"warning_count_total": importTaskWarningCount(tasks),
 	})
 }
@@ -158,19 +158,21 @@ func buildImportTaskResponses(tasks []importTask) []map[string]any {
 
 func buildImportTaskResponse(task importTask) map[string]any {
 	resp := map[string]any{
-		"task_id":        task.TaskID,
-		"type":           task.Type,
-		"status":         task.Status,
-		"created_at":     task.CreatedAt,
-		"started_at":     task.StartedAt,
-		"finished_at":    task.FinishedAt,
-		"updated_at":     task.UpdatedAt,
-		"error":          task.Error,
-		"file_count":     task.FileCount,
-		"file_names":     task.FileNames,
-		"warnings":       task.Warnings,
-		"warning_count":  len(task.Warnings),
-		"duration_ms":    importTaskDurationMillis(task),
+		"task_id":       task.TaskID,
+		"type":          task.Type,
+		"status":        task.Status,
+		"created_at":    task.CreatedAt,
+		"started_at":    task.StartedAt,
+		"finished_at":   task.FinishedAt,
+		"updated_at":    task.UpdatedAt,
+		"error":         task.Error,
+		"file_count":    task.FileCount,
+		"file_names":    task.FileNames,
+		"support_level": task.SupportLevel,
+		"warning_codes": task.WarningCodes,
+		"warnings":      task.Warnings,
+		"warning_count": len(task.Warnings),
+		"duration_ms":   importTaskDurationMillis(task),
 	}
 	return resp
 }
