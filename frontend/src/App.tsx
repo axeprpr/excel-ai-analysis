@@ -1,5 +1,14 @@
 import mermaid from "mermaid"
-import { useEffect, useId, useMemo, useState } from "react"
+import {
+  FileUp,
+  LoaderCircle,
+  MessageSquare,
+  PanelLeft,
+  Send,
+  Settings2,
+  Sparkles,
+} from "lucide-react"
+import { useEffect, useId, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,16 +22,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+
+type SidebarView = "chat" | "settings"
 
 type Session = {
   session_id: string
@@ -55,9 +58,37 @@ type QueryResponse = {
   executed: boolean
 }
 
+type ChatUploadResponse = {
+  session_id: string
+  session_created: boolean
+  import?: {
+    task_id: string
+    status: string
+    file_count: number
+    file_names: string[]
+    warning_count: number
+    warnings: string[]
+  }
+  answer?: QueryResponse
+}
+
+type ChatQueryResponse = {
+  session_id: string
+  answer: QueryResponse
+}
+
 type Message =
-  | { id: string; role: "user"; content: string }
-  | { id: string; role: "assistant"; content: QueryResponse }
+  | {
+      id: string
+      role: "user"
+      content: string
+      attachments?: string[]
+    }
+  | {
+      id: string
+      role: "assistant"
+      content: QueryResponse
+    }
 
 const initialSettings: Settings = {
   provider: "",
@@ -75,20 +106,21 @@ mermaid.initialize({
 })
 
 function App() {
+  const [sidebarView, setSidebarView] = useState<SidebarView>("chat")
   const [sessions, setSessions] = useState<Session[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState("")
   const [settings, setSettings] = useState<Settings>(initialSettings)
   const [globalStatus, setGlobalStatus] = useState<Record<string, unknown>>({})
   const [question, setQuestion] = useState("")
   const [chartMode, setChartMode] = useState<"data" | "mermaid" | "mcp">("data")
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messagesBySession, setMessagesBySession] = useState<Record<string, Message[]>>({})
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [statusText, setStatusText] = useState("准备就绪")
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const selectedSession = useMemo(
-    () => sessions.find((session) => session.session_id === selectedSessionId),
-    [selectedSessionId, sessions],
-  )
+  const activeMessages = selectedSessionId ? messagesBySession[selectedSessionId] || [] : []
+  const selectedSession = sessions.find((session) => session.session_id === selectedSessionId)
 
   useEffect(() => {
     void boot()
@@ -97,7 +129,7 @@ function App() {
   async function boot() {
     try {
       await Promise.all([loadStatus(), loadSettings(), loadSessions()])
-      setStatusText("前端已加载")
+      setStatusText("工作台已就绪")
     } catch (error) {
       setStatusText(asErrorMessage(error))
     }
@@ -112,9 +144,7 @@ function App() {
       ...init,
     })
     const contentType = response.headers.get("content-type") || ""
-    const body = contentType.includes("application/json")
-      ? await response.json()
-      : await response.text()
+    const body = contentType.includes("application/json") ? await response.json() : await response.text()
     if (!response.ok) {
       throw new Error(typeof body === "string" ? body : JSON.stringify(body))
     }
@@ -141,6 +171,8 @@ function App() {
       })
       setSettings(next)
       setStatusText("模型配置已保存")
+    } catch (error) {
+      setStatusText(asErrorMessage(error))
     } finally {
       setBusy(false)
     }
@@ -154,273 +186,476 @@ function App() {
     }
   }
 
-  async function createSession() {
-    setBusy(true)
-    try {
-      const session = await request<Session>("/api/sessions", { method: "POST" })
-      await loadSessions()
-      setSelectedSessionId(session.session_id)
-      setStatusText(`已创建 ${session.session_id}`)
-      await loadStatus()
-    } finally {
-      setBusy(false)
-    }
+  function startNewConversation() {
+    setSelectedSessionId("")
+    setPendingFiles([])
+    setQuestion("")
+    setStatusText("新对话已准备，可直接附加文件后提问")
+    setSidebarView("chat")
   }
 
-  async function uploadFiles(files: FileList | null) {
-    if (!selectedSessionId) throw new Error("请先选择 Session")
-    if (!files?.length) throw new Error("请选择上传文件")
-    setBusy(true)
-    try {
-      const form = new FormData()
-      Array.from(files).forEach((file) => form.append("file", file))
-      const response = await request<{ task_id: string }>(
-        `/api/sessions/${selectedSessionId}/files/upload`,
-        {
-          method: "POST",
-          body: form,
-        },
-      )
-      setStatusText(`上传成功，任务 ${response.task_id} 正在导入`)
-      await waitForImportTask(response.task_id)
-      await Promise.all([loadSessions(), loadStatus()])
-    } finally {
-      setBusy(false)
+  function queueFiles(fileList: FileList | null) {
+    if (!fileList?.length) {
+      return
     }
+    setPendingFiles((prev) => [...prev, ...Array.from(fileList)])
+    setStatusText(`已附加 ${fileList.length} 个文件，发送后会自动导入`)
   }
 
-  async function waitForImportTask(taskId: string) {
-    for (let i = 0; i < 60; i++) {
-      const task = await request<{ status: string; error?: string }>(
-        `/api/sessions/${selectedSessionId}/imports/${taskId}`,
-      )
-      if (task.status === "completed") {
-        setStatusText(`导入完成，任务 ${taskId}`)
-        return
-      }
-      if (task.status === "failed") {
-        throw new Error(task.error || "导入失败")
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-    }
-    throw new Error("导入等待超时")
+  function removePendingFile(name: string) {
+    setPendingFiles((prev) => prev.filter((file) => file.name !== name))
   }
 
   async function ask() {
-    if (!selectedSessionId) throw new Error("请先选择 Session")
-    if (!question.trim()) throw new Error("请输入问题")
     const content = question.trim()
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content }])
+    if (!content) {
+      setStatusText("请输入问题")
+      return
+    }
+    if (!selectedSessionId && pendingFiles.length === 0) {
+      setStatusText("新对话需要先附加文件，系统会自动创建会话")
+      return
+    }
+
+    const attachmentNames = pendingFiles.map((file) => file.name)
+    const sessionKey = selectedSessionId || `draft-${Date.now()}`
+    pushMessage(sessionKey, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content,
+      attachments: attachmentNames,
+    })
+
     setQuestion("")
     setBusy(true)
+
     try {
-      const response = await request<QueryResponse>(`/api/sessions/${selectedSessionId}/query`, {
+      if (pendingFiles.length > 0) {
+        const form = new FormData()
+        if (selectedSessionId) {
+          form.append("session_id", selectedSessionId)
+        }
+        form.append("question", content)
+        form.append("chart_mode", chartMode)
+        pendingFiles.forEach((file) => form.append("file", file))
+
+        const response = await request<ChatUploadResponse>("/api/chat/upload", {
+          method: "POST",
+          body: form,
+        })
+
+        const resolvedSessionID = response.session_id
+        adoptMessages(sessionKey, resolvedSessionID)
+        setSelectedSessionId(resolvedSessionID)
+        setPendingFiles([])
+
+        if (response.answer) {
+          pushMessage(resolvedSessionID, {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: response.answer,
+          })
+        }
+
+        await Promise.all([loadSessions(), loadStatus()])
+        setStatusText(
+          response.import
+            ? `已导入 ${response.import.file_count} 个文件并完成问答`
+            : "上传成功",
+        )
+        return
+      }
+
+      const response = await request<ChatQueryResponse>("/api/chat/query", {
         method: "POST",
         body: JSON.stringify({
+          session_id: selectedSessionId,
           question: content,
           chart_mode: chartMode,
         }),
       })
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: response },
-      ])
+
+      pushMessage(response.session_id, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: response.answer,
+      })
       setStatusText("查询完成")
+    } catch (error) {
+      setStatusText(asErrorMessage(error))
     } finally {
       setBusy(false)
     }
   }
 
+  function pushMessage(sessionID: string, message: Message) {
+    setMessagesBySession((prev) => ({
+      ...prev,
+      [sessionID]: [...(prev[sessionID] || []), message],
+    }))
+  }
+
+  function adoptMessages(fromSessionID: string, toSessionID: string) {
+    if (fromSessionID === toSessionID) {
+      return
+    }
+    setMessagesBySession((prev) => {
+      const existing = prev[fromSessionID] || []
+      const next = {
+        ...prev,
+        [toSessionID]: [...(prev[toSessionID] || []), ...existing],
+      }
+      delete next[fromSessionID]
+      return next
+    })
+  }
+
   return (
-    <div className="min-h-screen bg-transparent text-stone-900">
-      <div className="mx-auto max-w-[1500px] p-6">
-        <div className="mb-6 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card className="overflow-hidden bg-gradient-to-br from-white via-stone-50 to-orange-50">
-            <CardHeader>
-              <CardTitle className="text-3xl">Excel AI Analysis</CardTitle>
-              <CardDescription>
-                shadcn/ui 聊天工作台。上传 Excel，管理模型设置，并在对话消息里直接查看
-                数据 / Mermaid / MCP 图表结果。
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,244,214,0.8),_transparent_28%),linear-gradient(180deg,_#f5efe6_0%,_#efe7db_100%)] text-stone-900">
+      <div className="flex min-h-screen">
+        <aside className="w-full max-w-[320px] border-r border-white/60 bg-white/80 p-5 backdrop-blur-xl">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-stone-500">
+                <Sparkles className="size-4 text-orange-500" />
+                Excel AI Analysis
+              </div>
+              <div className="mt-2 text-2xl font-semibold tracking-tight">Workspace</div>
+              <div className="mt-1 text-sm text-stone-500">
+                一个聊天式的表格分析工作台
+              </div>
+            </div>
+            <div className="rounded-2xl border border-stone-200 bg-stone-50 p-2">
+              <PanelLeft className="size-4 text-stone-500" />
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-2">
+            <SidebarButton
+              active={sidebarView === "chat"}
+              icon={<MessageSquare className="size-4" />}
+              title="对话"
+              subtitle="聊天、附件和历史会话"
+              onClick={() => setSidebarView("chat")}
+            />
+            <SidebarButton
+              active={sidebarView === "settings"}
+              icon={<Settings2 className="size-4" />}
+              title="设置"
+              subtitle="模型和默认图表模式"
+              onClick={() => setSidebarView("settings")}
+            />
+          </div>
+
+          {sidebarView === "chat" ? (
+            <div className="mt-6 grid h-[calc(100vh-240px)] grid-rows-[auto_1fr] gap-4">
+              <Button className="justify-start rounded-2xl" onClick={startNewConversation} disabled={busy}>
+                <MessageSquare className="mr-2 size-4" />
+                新对话
+              </Button>
+
+              <ScrollArea className="pr-1">
+                <div className="grid gap-3">
+                  <div className="text-xs font-medium uppercase tracking-[0.18em] text-stone-400">
+                    Conversations
+                  </div>
+                  {sessions.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-stone-200 bg-stone-50 p-4 text-sm text-stone-500">
+                      还没有历史会话。直接在右侧附加文件并提问，系统会自动创建会话。
+                    </div>
+                  ) : (
+                    sessions.map((session) => (
+                      <button
+                        key={session.session_id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSessionId(session.session_id)
+                          setSidebarView("chat")
+                          setStatusText(`已切换到 ${session.session_id}`)
+                        }}
+                        className={`rounded-3xl border px-4 py-3 text-left transition ${
+                          selectedSessionId === session.session_id
+                            ? "border-orange-300 bg-orange-50 shadow-sm"
+                            : "border-stone-200 bg-white hover:bg-stone-50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="truncate text-sm font-medium">{session.session_id}</div>
+                          <Badge className="bg-stone-100 text-stone-700">{session.status}</Badge>
+                        </div>
+                        <div className="mt-2 text-xs text-stone-500">
+                          files {session.uploaded_file_count} · tables {session.table_count} · rows{" "}
+                          {session.total_row_count}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          ) : (
+            <div className="mt-6">
+              <Card className="border-stone-200 bg-white/90 shadow-none">
+                <CardHeader>
+                  <CardTitle>模型设置</CardTitle>
+                  <CardDescription>
+                    只保留大模型相关配置。MCP 已内置到服务端部署里，不需要在前端单独配置。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3">
+                  <Input
+                    placeholder="Provider"
+                    value={settings.provider}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, provider: event.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Model"
+                    value={settings.model}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, model: event.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Base URL"
+                    value={settings.base_url}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, base_url: event.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="API Key"
+                    value={settings.api_key}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, api_key: event.target.value }))
+                    }
+                  />
+                  <Select
+                    value={settings.default_chart_mode}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        default_chart_mode: event.target.value as Settings["default_chart_mode"],
+                      }))
+                    }
+                  >
+                    <option value="data">data</option>
+                    <option value="mermaid">mermaid</option>
+                    <option value="mcp">mcp</option>
+                  </Select>
+                  <Button onClick={() => void saveSettings()} disabled={busy}>
+                    保存设置
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </aside>
+
+        <main className="flex min-w-0 flex-1 flex-col p-6">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-stone-500">Chat Analyst</div>
+              <h1 className="text-3xl font-semibold tracking-tight">SaaS-style spreadsheet Q&A</h1>
+              <p className="mt-1 text-sm text-stone-500">
+                把文件作为对话附件发送，系统会自动创建会话并完成导入。
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
               <Badge>sessions: {String(globalStatus.session_count ?? 0)}</Badge>
               <Badge>ready: {String(globalStatus.ready_session_count ?? 0)}</Badge>
               <Badge>files: {String(globalStatus.uploaded_file_count ?? 0)}</Badge>
               <Badge>tables: {String(globalStatus.imported_table_count ?? 0)}</Badge>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>模型配置</CardTitle>
-              <CardDescription>本地保存大模型与 MCP 图表服务配置。</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3">
-              <Input
-                placeholder="Provider"
-                value={settings.provider}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, provider: event.target.value }))
-                }
-              />
-              <Input
-                placeholder="Model"
-                value={settings.model}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, model: event.target.value }))
-                }
-              />
-              <Input
-                placeholder="Base URL"
-                value={settings.base_url}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, base_url: event.target.value }))
-                }
-              />
-              <Input
-                placeholder="API Key"
-                value={settings.api_key}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, api_key: event.target.value }))
-                }
-              />
-              <Select
-                value={settings.default_chart_mode}
-                onChange={(event) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    default_chart_mode: event.target.value as Settings["default_chart_mode"],
-                  }))
-                }
-              >
-                <option value="data">data</option>
-                <option value="mermaid">mermaid</option>
-                <option value="mcp">mcp</option>
-              </Select>
-              <Input
-                placeholder="MCP Server URL"
-                value={settings.mcp_server_url}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, mcp_server_url: event.target.value }))
-                }
-              />
-              <Button onClick={() => void saveSettings()} disabled={busy}>
-                保存配置
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="h-[calc(100vh-220px)]">
-            <CardHeader>
-              <CardTitle>Sessions</CardTitle>
-              <CardDescription>左侧管理会话、上传和当前数据范围。</CardDescription>
-            </CardHeader>
-            <CardContent className="grid h-[calc(100%-112px)] grid-rows-[auto_auto_1fr] gap-4">
-              <Button onClick={() => void createSession()} disabled={busy}>
-                创建 Session
-              </Button>
-              <div className="grid gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-3">
-                <div className="text-sm font-medium">上传文件到当前 Session</div>
-                <input
-                  type="file"
-                  multiple
-                  onChange={(event) => {
-                    void uploadFiles(event.target.files).catch((error) =>
-                      setStatusText(asErrorMessage(error)),
-                    )
-                  }}
-                />
-              </div>
-              <ScrollArea className="grid gap-3 pr-1">
-                <div className="grid gap-3">
-                  {sessions.map((session) => (
-                    <button
-                      key={session.session_id}
-                      type="button"
-                      className={`rounded-2xl border p-4 text-left transition ${
-                        selectedSessionId === session.session_id
-                          ? "border-orange-400 bg-orange-50"
-                          : "border-stone-200 bg-white hover:bg-stone-50"
-                      }`}
-                      onClick={() => setSelectedSessionId(session.session_id)}
-                    >
-                      <div className="font-medium">{session.session_id}</div>
-                      <div className="mt-1 text-sm text-stone-500">{session.status}</div>
-                      <div className="mt-2 text-xs text-stone-500">
-                        files {session.uploaded_file_count} · tables {session.table_count} · rows{" "}
-                        {session.total_row_count}
-                      </div>
-                    </button>
-                  ))}
+          <div className="grid min-h-0 flex-1 grid-rows-[auto_1fr_auto] gap-4">
+            <Card className="rounded-[28px] border-white/80 bg-white/85 shadow-[0_20px_70px_rgba(28,25,23,0.08)]">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
+                <div>
+                  <div className="text-sm font-medium text-stone-900">
+                    {selectedSession ? "当前会话已连接" : "等待首个文件上传"}
+                  </div>
+                  <div className="mt-1 text-sm text-stone-500">
+                    {selectedSession
+                      ? `${selectedSession.session_id} · ${selectedSession.table_count} tables · ${selectedSession.total_row_count} rows`
+                      : "没有显式的创建 Session 按钮。上传文件时自动创建。"}
+                  </div>
                 </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          <Card className="h-[calc(100vh-220px)]">
-            <CardHeader>
-              <CardTitle>Chat Workspace</CardTitle>
-              <CardDescription>
-                当前会话：
-                <span className="ml-1 font-medium">
-                  {selectedSession?.session_id || "未选择"}
-                </span>
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid h-[calc(100%-112px)] grid-rows-[1fr_auto] gap-4">
-              <ScrollArea className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-                <div className="grid gap-4">
-                  {messages.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">
-                      还没有对话。先创建 Session、上传文件，然后在下方提问。
-                    </div>
-                  ) : (
-                    messages.map((message) =>
-                      message.role === "user" ? (
-                        <div key={message.id} className="ml-auto max-w-[80%] rounded-3xl bg-stone-900 px-4 py-3 text-sm text-white">
-                          {message.content}
-                        </div>
-                      ) : (
-                        <AssistantMessage key={message.id} response={message.content} />
-                      ),
-                    )
-                  )}
+                <div className="flex items-center gap-3">
+                  <Select
+                    value={chartMode}
+                    onChange={(event) => setChartMode(event.target.value as "data" | "mermaid" | "mcp")}
+                    className="min-w-[140px]"
+                  >
+                    <option value="data">data</option>
+                    <option value="mermaid">mermaid</option>
+                    <option value="mcp">mcp</option>
+                  </Select>
                 </div>
-              </ScrollArea>
+              </CardContent>
+            </Card>
 
-              <div className="grid gap-3">
-                <Separator />
-                <div className="grid gap-3 md:grid-cols-[1fr_180px]">
+            <Card className="min-h-0 rounded-[32px] border-white/80 bg-white/90 shadow-[0_20px_70px_rgba(28,25,23,0.08)]">
+              <CardContent className="h-full p-4">
+                <ScrollArea className="h-[calc(100vh-320px)] rounded-[26px] bg-stone-50/80 p-4">
+                  <div className="grid gap-4">
+                    {activeMessages.length === 0 ? (
+                      <EmptyState pendingFiles={pendingFiles} />
+                    ) : (
+                      activeMessages.map((message) =>
+                        message.role === "user" ? (
+                          <UserMessage key={message.id} message={message} />
+                        ) : (
+                          <AssistantMessage key={message.id} response={message.content} />
+                        ),
+                      )
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[30px] border-white/80 bg-white/95 shadow-[0_20px_70px_rgba(28,25,23,0.08)]">
+              <CardContent className="p-4">
+                {pendingFiles.length > 0 ? (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {pendingFiles.map((file) => (
+                      <button
+                        key={`${file.name}-${file.size}`}
+                        type="button"
+                        onClick={() => removePendingFile(file.name)}
+                        className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs text-orange-800"
+                      >
+                        <FileUp className="size-3.5" />
+                        {file.name}
+                        <span className="text-orange-500">×</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                   <Textarea
-                    placeholder="例如：按月展示销售趋势，顺便给我图表"
+                    className="min-h-[120px] rounded-[24px] border-stone-200 bg-stone-50 px-4 py-4"
+                    placeholder="问业务问题，或者先附加文件再发送。没有单独上传区，也不需要手动创建 Session。"
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
                   />
+
                   <div className="grid gap-3">
-                    <Select
-                      value={chartMode}
-                      onChange={(event) =>
-                        setChartMode(event.target.value as "data" | "mermaid" | "mcp")
-                      }
+                    <input
+                      ref={fileInputRef}
+                      className="hidden"
+                      type="file"
+                      multiple
+                      onChange={(event) => {
+                        queueFiles(event.target.files)
+                        event.target.value = ""
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      className="h-11 justify-start rounded-2xl"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={busy}
                     >
-                      <option value="data">data</option>
-                      <option value="mermaid">mermaid</option>
-                      <option value="mcp">mcp</option>
-                    </Select>
-                    <Button onClick={() => void ask()} disabled={busy}>
-                      发送问题
+                      <FileUp className="mr-2 size-4" />
+                      附加文件
+                    </Button>
+                    <Button className="h-11 justify-start rounded-2xl" onClick={() => void ask()} disabled={busy}>
+                      {busy ? (
+                        <LoaderCircle className="mr-2 size-4 animate-spin" />
+                      ) : (
+                        <Send className="mr-2 size-4" />
+                      )}
+                      发送
                     </Button>
                   </div>
                 </div>
-                <div className="text-sm text-stone-500">{statusText}</div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+
+                <div className="mt-3 text-sm text-stone-500">{statusText}</div>
+              </CardContent>
+            </Card>
+          </div>
+        </main>
       </div>
+    </div>
+  )
+}
+
+function SidebarButton({
+  active,
+  icon,
+  title,
+  subtitle,
+  onClick,
+}: {
+  active: boolean
+  icon: React.ReactNode
+  title: string
+  subtitle: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-start gap-3 rounded-3xl border px-4 py-3 text-left transition ${
+        active
+          ? "border-orange-300 bg-orange-50 text-stone-950 shadow-sm"
+          : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+      }`}
+    >
+      <div className="mt-0.5 rounded-2xl border border-current/10 bg-white/80 p-2">{icon}</div>
+      <div>
+        <div className="font-medium">{title}</div>
+        <div className="mt-1 text-sm text-stone-500">{subtitle}</div>
+      </div>
+    </button>
+  )
+}
+
+function EmptyState({ pendingFiles }: { pendingFiles: File[] }) {
+  return (
+    <div className="grid place-items-center rounded-[28px] border border-dashed border-stone-300 bg-white p-10 text-center">
+      <div className="max-w-xl">
+        <div className="mx-auto mb-4 inline-flex rounded-full border border-orange-200 bg-orange-50 p-3 text-orange-600">
+          <Sparkles className="size-5" />
+        </div>
+        <h2 className="text-xl font-semibold tracking-tight">直接通过聊天开始分析</h2>
+        <p className="mt-2 text-sm leading-6 text-stone-500">
+          不需要创建 Session，也没有独立上传面板。把文件作为消息附件发送，系统会自动创建会话、导入数据并返回 SQL、表格和图表。
+        </p>
+        {pendingFiles.length > 0 ? (
+          <div className="mt-4 text-sm text-stone-600">
+            当前已附加 {pendingFiles.length} 个文件，发送后会自动导入。
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function UserMessage({ message }: { message: Extract<Message, { role: "user" }> }) {
+  return (
+    <div className="ml-auto max-w-[78%] rounded-[28px] bg-stone-950 px-4 py-3 text-sm text-white shadow-sm">
+      <div>{message.content}</div>
+      {message.attachments?.length ? (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-stone-300">
+          {message.attachments.map((item) => (
+            <span
+              key={item}
+              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1"
+            >
+              <FileUp className="size-3" />
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -430,23 +665,21 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
   const columns = response.columns || []
   const chart = (response.chart || {}) as Record<string, unknown>
   const mcpResult = (chart.result || {}) as Record<string, unknown>
-  const mcpURL = typeof chart.url === "string" ? chart.url : typeof mcpResult.url === "string" ? mcpResult.url : ""
+  const mcpURL =
+    typeof chart.url === "string" ? chart.url : typeof mcpResult.url === "string" ? mcpResult.url : ""
   const mcpExecuted = typeof chart.executed === "boolean" ? chart.executed : false
   const mcpTool = String(chart.tool || mcpResult.tool_name || "")
   const mcpError = String(chart.error || "")
 
   return (
-    <div className="grid gap-3 rounded-3xl border border-stone-200 bg-white p-4 shadow-sm">
+    <div className="grid gap-3 rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm">
       <div className="text-sm font-medium text-stone-900">{response.summary}</div>
       <div className="text-xs text-stone-500">
-        mode: {response.chart_mode} · executed: {String(response.executed)} · rows:{" "}
-        {response.row_count}
+        mode: {response.chart_mode} · executed: {String(response.executed)} · rows: {response.row_count}
       </div>
-      <pre className="overflow-auto rounded-2xl bg-stone-950 p-4 text-xs text-stone-100">
-        {response.sql}
-      </pre>
+      <pre className="overflow-auto rounded-2xl bg-stone-950 p-4 text-xs text-stone-100">{response.sql}</pre>
 
-      <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+      <div className="rounded-[24px] border border-stone-200 bg-stone-50 p-4">
         {chart.mode === "mermaid" ? (
           <MermaidChart content={String(chart.content || "")} />
         ) : chart.mode === "mcp" ? (
@@ -587,9 +820,7 @@ function MermaidChart({ content }: { content: string }) {
     return (
       <div className="grid gap-2">
         <div className="text-xs font-medium text-red-600">Mermaid 渲染失败</div>
-        <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
-          {content}
-        </pre>
+        <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">{content}</pre>
         <div className="text-xs text-stone-500">{error}</div>
       </div>
     )
@@ -599,12 +830,7 @@ function MermaidChart({ content }: { content: string }) {
     return <div className="text-xs text-stone-500">正在渲染 Mermaid 图表...</div>
   }
 
-  return (
-    <div
-      className="overflow-auto rounded-xl bg-white p-3"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  )
+  return <div className="overflow-auto rounded-xl bg-white p-3" dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
 function asErrorMessage(error: unknown) {
