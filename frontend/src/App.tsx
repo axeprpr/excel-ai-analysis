@@ -194,12 +194,14 @@ function App() {
     setSidebarView("chat")
   }
 
-  function queueFiles(fileList: FileList | null) {
+  async function queueFiles(fileList: FileList | null) {
     if (!fileList?.length) {
       return
     }
-    setPendingFiles((prev) => [...prev, ...Array.from(fileList)])
-    setStatusText(`已附加 ${fileList.length} 个文件，发送后会自动导入`)
+    const files = Array.from(fileList)
+    setPendingFiles((prev) => [...prev, ...files])
+    setStatusText(`正在导入 ${files.length} 个文件...`)
+    await uploadPendingFiles(files)
   }
 
   function removePendingFile(name: string) {
@@ -281,6 +283,35 @@ function App() {
         content: response.answer,
       })
       setStatusText("查询完成")
+    } catch (error) {
+      setStatusText(asErrorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function uploadPendingFiles(files: File[]) {
+    const sessionKey = selectedSessionId || `draft-${Date.now()}`
+    setBusy(true)
+    try {
+      const form = new FormData()
+      if (selectedSessionId) {
+        form.append("session_id", selectedSessionId)
+      }
+      form.append("chart_mode", chartMode)
+      files.forEach((file) => form.append("file", file))
+
+      const response = await request<ChatUploadResponse>("/api/chat/upload", {
+        method: "POST",
+        body: form,
+      })
+
+      const resolvedSessionID = response.session_id
+      adoptMessages(sessionKey, resolvedSessionID)
+      setSelectedSessionId(resolvedSessionID)
+      setPendingFiles([])
+      await Promise.all([loadSessions(), loadStatus()])
+      setStatusText(`已导入 ${response.import?.file_count || files.length} 个文件`)
     } catch (error) {
       setStatusText(asErrorMessage(error))
     } finally {
@@ -552,7 +583,9 @@ function App() {
                       type="file"
                       multiple
                       onChange={(event) => {
-                        queueFiles(event.target.files)
+                        void queueFiles(event.target.files).catch((error) =>
+                          setStatusText(asErrorMessage(error)),
+                        )
                         event.target.value = ""
                       }}
                     />
