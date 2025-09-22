@@ -86,6 +86,11 @@ type Message =
     }
   | {
       id: string
+      role: "system"
+      content: string
+    }
+  | {
+      id: string
       role: "assistant"
       content: QueryResponse
     }
@@ -210,17 +215,18 @@ function App() {
 
   async function ask() {
     const content = question.trim()
+    const effectiveSessionID = selectedSessionId || sessions[0]?.session_id || ""
     if (!content) {
       setStatusText("请输入问题")
       return
     }
-    if (!selectedSessionId && pendingFiles.length === 0) {
+    if (!effectiveSessionID && pendingFiles.length === 0) {
       setStatusText("新对话需要先附加文件，系统会自动创建会话")
       return
     }
 
     const attachmentNames = pendingFiles.map((file) => file.name)
-    const sessionKey = selectedSessionId || `draft-${Date.now()}`
+    const sessionKey = effectiveSessionID || `draft-${Date.now()}`
     pushMessage(sessionKey, {
       id: crypto.randomUUID(),
       role: "user",
@@ -271,7 +277,7 @@ function App() {
       const response = await request<ChatQueryResponse>("/api/chat/query", {
         method: "POST",
         body: JSON.stringify({
-          session_id: selectedSessionId,
+          session_id: effectiveSessionID,
           question: content,
           chart_mode: chartMode,
         }),
@@ -310,6 +316,11 @@ function App() {
       adoptMessages(sessionKey, resolvedSessionID)
       setSelectedSessionId(resolvedSessionID)
       setPendingFiles([])
+      pushMessage(resolvedSessionID, {
+        id: crypto.randomUUID(),
+        role: "system",
+        content: `已导入 ${response.import?.file_count || files.length} 个文件，会话 ${resolvedSessionID} 已就绪。`,
+      })
       await Promise.all([loadSessions(), loadStatus()])
       setStatusText(`已导入 ${response.import?.file_count || files.length} 个文件`)
     } catch (error) {
@@ -539,6 +550,8 @@ function App() {
                       activeMessages.map((message) =>
                         message.role === "user" ? (
                           <UserMessage key={message.id} message={message} />
+                        ) : message.role === "system" ? (
+                          <SystemMessage key={message.id} content={message.content} />
                         ) : (
                           <AssistantMessage key={message.id} response={message.content} />
                         ),
@@ -689,6 +702,14 @@ function UserMessage({ message }: { message: Extract<Message, { role: "user" }> 
           ))}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function SystemMessage({ content }: { content: string }) {
+  return (
+    <div className="mx-auto max-w-[75%] rounded-full border border-stone-200 bg-stone-100 px-4 py-2 text-center text-xs text-stone-600">
+      {content}
     </div>
   )
 }
