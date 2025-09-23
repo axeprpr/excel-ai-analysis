@@ -123,9 +123,10 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [statusText, setStatusText] = useState("准备就绪")
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const effectiveSessionID = selectedSessionId || sessions[0]?.session_id || ""
 
-  const activeMessages = selectedSessionId ? messagesBySession[selectedSessionId] || [] : []
-  const selectedSession = sessions.find((session) => session.session_id === selectedSessionId)
+  const activeMessages = effectiveSessionID ? messagesBySession[effectiveSessionID] || [] : []
+  const selectedSession = sessions.find((session) => session.session_id === effectiveSessionID)
 
   useEffect(() => {
     void boot()
@@ -215,7 +216,6 @@ function App() {
 
   async function ask() {
     const content = question.trim()
-    const effectiveSessionID = selectedSessionId || sessions[0]?.session_id || ""
     if (!content) {
       setStatusText("请输入问题")
       return
@@ -228,7 +228,7 @@ function App() {
     const attachmentNames = pendingFiles.map((file) => file.name)
     const sessionKey = effectiveSessionID || `draft-${Date.now()}`
     pushMessage(sessionKey, {
-      id: crypto.randomUUID(),
+      id: nextMessageID(),
       role: "user",
       content,
       attachments: attachmentNames,
@@ -236,6 +236,10 @@ function App() {
 
     setQuestion("")
     setBusy(true)
+    if (!selectedSessionId && effectiveSessionID) {
+      setSelectedSessionId(effectiveSessionID)
+    }
+    setStatusText("正在查询...")
 
     try {
       if (pendingFiles.length > 0) {
@@ -259,7 +263,7 @@ function App() {
 
         if (response.answer) {
           pushMessage(resolvedSessionID, {
-            id: crypto.randomUUID(),
+            id: nextMessageID(),
             role: "assistant",
             content: response.answer,
           })
@@ -284,7 +288,7 @@ function App() {
       })
 
       pushMessage(response.session_id, {
-        id: crypto.randomUUID(),
+        id: nextMessageID(),
         role: "assistant",
         content: response.answer,
       })
@@ -317,7 +321,7 @@ function App() {
       setSelectedSessionId(resolvedSessionID)
       setPendingFiles([])
       pushMessage(resolvedSessionID, {
-        id: crypto.randomUUID(),
+        id: nextMessageID(),
         role: "system",
         content: `已导入 ${response.import?.file_count || files.length} 个文件，会话 ${resolvedSessionID} 已就绪。`,
       })
@@ -890,6 +894,14 @@ function MermaidChart({ content }: { content: string }) {
 function asErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message
   return String(error)
+}
+
+function nextMessageID() {
+  const maybeCrypto = globalThis.crypto as Crypto | undefined
+  if (maybeCrypto && typeof maybeCrypto.randomUUID === "function") {
+    return maybeCrypto.randomUUID()
+  }
+  return `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 export default App
