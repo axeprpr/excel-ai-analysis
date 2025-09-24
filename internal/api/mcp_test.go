@@ -12,6 +12,9 @@ func TestExecuteChartMCP(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", r.Method)
 		}
+		if got := r.Header.Get("Accept"); got != "application/json, text/event-stream" {
+			t.Fatalf("expected Accept header %q, got %q", "application/json, text/event-stream", got)
+		}
 
 		var req mcpRPCRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

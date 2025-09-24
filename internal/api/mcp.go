@@ -131,6 +131,7 @@ func callMCPTool(endpoint, toolName string, arguments map[string]any) (mcpRPCRes
 		return mcpRPCResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)

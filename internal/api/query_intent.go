@@ -52,6 +52,15 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 		intent.Mode = "share"
 		intent.ChartType = "pie"
 	}
+	if hasAny(q, "柱状图", "条形图", "bar chart", "bar graph") {
+		intent.ChartType = "bar"
+	}
+	if hasAny(q, "折线图", "line chart", "line graph") {
+		intent.ChartType = "line"
+	}
+	if hasAny(q, "饼图", "pie chart") {
+		intent.ChartType = "pie"
+	}
 	if hasAny(q, "top", "rank", "highest", "排名", "最高", "最多", "lowest", "最低") {
 		intent.Ranking = true
 		intent.Mode = "topn"
