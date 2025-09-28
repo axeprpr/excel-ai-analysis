@@ -10,12 +10,16 @@ import (
 )
 
 type modelSettings struct {
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	BaseURL          string `json:"base_url"`
-	APIKey           string `json:"api_key"`
-	DefaultChartMode string `json:"default_chart_mode"`
-	MCPServerURL     string `json:"mcp_server_url"`
+	Provider          string `json:"provider"`
+	Model             string `json:"model"`
+	BaseURL           string `json:"base_url"`
+	APIKey            string `json:"api_key"`
+	EmbeddingProvider string `json:"embedding_provider"`
+	EmbeddingModel    string `json:"embedding_model"`
+	EmbeddingBaseURL  string `json:"embedding_base_url"`
+	EmbeddingAPIKey   string `json:"embedding_api_key"`
+	DefaultChartMode  string `json:"default_chart_mode"`
+	MCPServerURL      string `json:"mcp_server_url"`
 }
 
 func (h *Handler) handleModelSettings(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +40,10 @@ func (h *Handler) handleModelSettings(w http.ResponseWriter, r *http.Request) {
 		input.Provider = strings.TrimSpace(input.Provider)
 		input.Model = strings.TrimSpace(input.Model)
 		input.BaseURL = strings.TrimSpace(input.BaseURL)
+		input.EmbeddingProvider = strings.TrimSpace(input.EmbeddingProvider)
+		input.EmbeddingModel = strings.TrimSpace(input.EmbeddingModel)
+		input.EmbeddingBaseURL = strings.TrimSpace(input.EmbeddingBaseURL)
+		input.EmbeddingAPIKey = strings.TrimSpace(input.EmbeddingAPIKey)
 		input.DefaultChartMode = normalizeChartMode(input.DefaultChartMode)
 		input.MCPServerURL = strings.TrimSpace(input.MCPServerURL)
 		if input.DefaultChartMode == "" {
@@ -85,12 +93,16 @@ func (h *Handler) writeModelSettings(settings modelSettings) error {
 
 func defaultModelSettings() modelSettings {
 	return modelSettings{
-		Provider:         "",
-		Model:            "",
-		BaseURL:          "",
-		APIKey:           "",
-		DefaultChartMode: "data",
-		MCPServerURL:     "http://chart-mcp:1122/mcp",
+		Provider:          "",
+		Model:             "",
+		BaseURL:           "",
+		APIKey:            "",
+		EmbeddingProvider: "",
+		EmbeddingModel:    "",
+		EmbeddingBaseURL:  "",
+		EmbeddingAPIKey:   "",
+		DefaultChartMode:  "data",
+		MCPServerURL:      "http://chart-mcp:1122/mcp",
 	}
 }
 
