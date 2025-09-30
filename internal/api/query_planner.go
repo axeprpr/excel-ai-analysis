@@ -34,6 +34,13 @@ type sqlPlan struct {
 	SQL                string
 }
 
+type planningSelection struct {
+	Table              tableSchema
+	CandidateTables    []string
+	PlanningConfidence float64
+	SelectionReason    string
+}
+
 func buildSQLPlan(snapshot schemaSnapshot, question string, intent queryIntent) sqlPlan {
 	if len(snapshot.Tables) == 0 {
 		return sqlPlan{
@@ -56,6 +63,39 @@ func buildSQLPlan(snapshot schemaSnapshot, question string, intent queryIntent) 
 	}
 
 	table, candidates, confidence, reason := choosePlanningTable(snapshot, question)
+	return buildSQLPlanForSelection(snapshot, question, intent, planningSelection{
+		Table:              table,
+		CandidateTables:    candidates,
+		PlanningConfidence: confidence,
+		SelectionReason:    reason,
+	})
+}
+
+func buildSQLPlanForSelection(snapshot schemaSnapshot, question string, intent queryIntent, selection planningSelection) sqlPlan {
+	if len(snapshot.Tables) == 0 {
+		return sqlPlan{
+			SourceTable:        "",
+			SourceFile:         "",
+			SourceSheet:        "",
+			Mode:               intent.Mode,
+			ChartType:          intent.ChartType,
+			CandidateTables:    []string{},
+			PlanningConfidence: 0,
+			SelectionReason:    "no imported tables available",
+			DimensionColumn:    "",
+			MetricColumn:       "",
+			TimeColumn:         "",
+			FilterHints:        intent.FilterHints,
+			Filters:            nil,
+			SelectedColumns:    []string{},
+			SQL:                "-- no imported tables available",
+		}
+	}
+
+	table := selection.Table
+	if table.TableName == "" {
+		table = snapshot.Tables[0]
+	}
 	dimension := firstDimensionColumn(table)
 	metric := firstMetricColumn(table)
 	timeColumn := firstTimeColumn(table)
@@ -64,9 +104,9 @@ func buildSQLPlan(snapshot schemaSnapshot, question string, intent queryIntent) 
 		SourceTable:        table.TableName,
 		SourceFile:         table.SourceFile,
 		SourceSheet:        table.SourceSheet,
-		CandidateTables:    candidates,
-		PlanningConfidence: confidence,
-		SelectionReason:    reason,
+		CandidateTables:    selection.CandidateTables,
+		PlanningConfidence: selection.PlanningConfidence,
+		SelectionReason:    selection.SelectionReason,
 		Mode:               intent.Mode,
 		ChartType:          intent.ChartType,
 		DimensionColumn:    dimension,
