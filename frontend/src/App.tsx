@@ -41,8 +41,37 @@ type Settings = {
   model: string
   base_url: string
   api_key: string
+  embedding_provider: string
+  embedding_model: string
+  embedding_base_url: string
+  embedding_api_key: string
   default_chart_mode: "data" | "mermaid" | "mcp"
   mcp_server_url: string
+}
+
+type PlannedFilter = {
+  column: string
+  operator: string
+  value: string
+}
+
+type QueryPlan = {
+  source_table: string
+  source_file: string
+  source_sheet: string
+  candidate_tables: string[]
+  planning_confidence: number
+  selection_reason: string
+  dimension_column: string
+  metric_column: string
+  time_column: string
+  selected_columns: string[]
+  filters: string[]
+  planned_filters: PlannedFilter[]
+  question: string
+  chart_type: string
+  mode: string
+  sql: string
 }
 
 type QueryResponse = {
@@ -53,6 +82,7 @@ type QueryResponse = {
   chart_mode: "data" | "mermaid" | "mcp"
   chart?: Record<string, unknown>
   visualization?: Record<string, unknown>
+  query_plan?: QueryPlan
   warnings?: string[]
   row_count: number
   executed: boolean
@@ -100,6 +130,10 @@ const initialSettings: Settings = {
   model: "",
   base_url: "",
   api_key: "",
+  embedding_provider: "",
+  embedding_model: "",
+  embedding_base_url: "",
+  embedding_api_key: "",
   default_chart_mode: "data",
   mcp_server_url: "http://chart-mcp:1122/mcp",
 }
@@ -477,6 +511,37 @@ function App() {
                       setSettings((prev) => ({ ...prev, api_key: event.target.value }))
                     }
                   />
+                  <div className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-400">
+                    Embeddings
+                  </div>
+                  <Input
+                    placeholder="Embedding Provider"
+                    value={settings.embedding_provider}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, embedding_provider: event.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Embedding Model"
+                    value={settings.embedding_model}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, embedding_model: event.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Embedding Base URL"
+                    value={settings.embedding_base_url}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, embedding_base_url: event.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Embedding API Key"
+                    value={settings.embedding_api_key}
+                    onChange={(event) =>
+                      setSettings((prev) => ({ ...prev, embedding_api_key: event.target.value }))
+                    }
+                  />
                   <Select
                     value={settings.default_chart_mode}
                     onChange={(event) =>
@@ -718,10 +783,102 @@ function SystemMessage({ content }: { content: string }) {
   )
 }
 
+function DataChart({
+  rows,
+  columns,
+  chartType,
+  xKey,
+  yKey,
+}: {
+  rows: Record<string, unknown>[]
+  columns: string[]
+  chartType: string
+  xKey: string
+  yKey: string
+}) {
+  if (rows.length === 0 || columns.length === 0) {
+    return <div className="text-xs text-stone-500">没有可渲染的数据。</div>
+  }
+
+  const points = rows.slice(0, 8).map((row, index) => {
+    const x = String(row[xKey] ?? row[columns[0]] ?? `item-${index}`)
+    const y = Number(row[yKey] ?? row[columns[columns.length - 1]] ?? 0)
+    return { x, y }
+  })
+  const max = Math.max(...points.map((point) => point.y), 1)
+  const total = points.reduce((sum, point) => sum + point.y, 0)
+
+  if (chartType === "pie") {
+    return (
+      <div className="grid gap-2">
+        {points.map((point) => (
+          <div key={point.x} className="grid gap-1">
+            <div className="flex items-center justify-between text-xs text-stone-600">
+              <span>{point.x}</span>
+              <span>{total > 0 ? `${Math.round((point.y / total) * 100)}%` : "0%"}</span>
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-stone-200">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400"
+                style={{ width: `${total > 0 ? (point.y / total) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (chartType === "line") {
+    return (
+      <div className="grid gap-2">
+        <div className="flex items-end gap-2">
+          {points.map((point) => (
+            <div key={point.x} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+              <div className="text-[10px] text-stone-500">{point.y}</div>
+              <div className="flex h-28 w-full items-end rounded-2xl bg-white px-2 py-2">
+                <div
+                  className="w-full rounded-xl bg-gradient-to-t from-sky-500 to-cyan-300"
+                  style={{ height: `${(point.y / max) * 100}%` }}
+                />
+              </div>
+              <div className="max-w-full truncate text-[10px] text-stone-500">{point.x}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (chartType === "bar") {
+    return (
+      <div className="grid gap-3">
+        {points.map((point) => (
+          <div key={point.x} className="grid gap-1">
+            <div className="text-xs text-stone-600">
+              {point.x} · {point.y}
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-stone-200">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400"
+                style={{ width: `${(point.y / max) * 100}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return <div className="text-xs text-stone-500">当前结果更适合表格展示。</div>
+}
+
 function AssistantMessage({ response }: { response: QueryResponse }) {
   const rows = response.rows || []
   const columns = response.columns || []
   const chart = (response.chart || {}) as Record<string, unknown>
+  const visualization = (response.visualization || {}) as Record<string, unknown>
+  const queryPlan = response.query_plan
   const mcpResult = (chart.result || {}) as Record<string, unknown>
   const mcpURL =
     typeof chart.url === "string" ? chart.url : typeof mcpResult.url === "string" ? mcpResult.url : ""
@@ -735,6 +892,28 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
       <div className="text-xs text-stone-500">
         mode: {response.chart_mode} · executed: {String(response.executed)} · rows: {response.row_count}
       </div>
+      {queryPlan ? (
+        <div className="grid gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-3">
+          <div className="flex flex-wrap gap-2 text-xs">
+            <Badge className="bg-orange-100 text-orange-700">intent: {queryPlan.mode}</Badge>
+            <Badge className="bg-sky-100 text-sky-700">chart: {queryPlan.chart_type || "table"}</Badge>
+            <Badge className="bg-emerald-100 text-emerald-700">
+              confidence: {Math.round((queryPlan.planning_confidence || 0) * 100)}%
+            </Badge>
+          </div>
+          <div className="grid gap-1 text-xs text-stone-600">
+            <div>
+              source: {queryPlan.source_table || "-"}
+              {queryPlan.source_file ? ` · ${queryPlan.source_file}` : ""}
+              {queryPlan.source_sheet ? ` · ${queryPlan.source_sheet}` : ""}
+            </div>
+            <div>reason: {queryPlan.selection_reason || "-"}</div>
+            {queryPlan.candidate_tables?.length ? (
+              <div>candidates: {queryPlan.candidate_tables.join(", ")}</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <pre className="overflow-auto rounded-2xl bg-stone-950 p-4 text-xs text-stone-100">{response.sql}</pre>
 
       <div className="rounded-[24px] border border-stone-200 bg-stone-50 p-4">
@@ -781,26 +960,13 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
             </pre>
           </div>
         ) : (
-          <div className="grid gap-3">
-            {rows.slice(0, 8).map((row, index) => {
-              const x = String(row[columns[0]] ?? `item-${index}`)
-              const y = Number(row[columns[columns.length - 1]] ?? 0)
-              const max = Math.max(...rows.map((item) => Number(item[columns[columns.length - 1]] ?? 0)), 1)
-              return (
-                <div key={`${x}-${index}`} className="grid gap-1">
-                  <div className="text-xs text-stone-600">
-                    {x} · {y}
-                  </div>
-                  <div className="h-3 overflow-hidden rounded-full bg-stone-200">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400"
-                      style={{ width: `${(y / max) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <DataChart
+            rows={rows}
+            columns={columns}
+            chartType={String(visualization.type || queryPlan?.chart_type || "table")}
+            xKey={String(visualization.x || columns[0] || "")}
+            yKey={String(visualization.y || columns[columns.length - 1] || "")}
+          />
         )}
       </div>
 
