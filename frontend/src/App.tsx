@@ -479,7 +479,7 @@ function App() {
                 <CardHeader>
                   <CardTitle>模型设置</CardTitle>
                   <CardDescription>
-                    只保留大模型相关配置。MCP 已内置到服务端部署里，不需要在前端单独配置。
+                    配置 SQL 生成模型和 embedding 检索模型。MCP 已内置到服务端部署里，不需要在前端单独配置。
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-3">

@@ -467,7 +467,6 @@ func queryWarning(executed bool) string {
 func queryWarnings(plan queryPlan, result queryExecutionResult) []string {
 	warnings := []string{
 		queryWarning(result.OK),
-		"AI text-to-SQL generation is not implemented yet.",
 	}
 	if result.Error != "" {
 		warnings = append(warnings, "SQLite execution failed and fell back to placeholder data: "+result.Error)
