@@ -1407,6 +1407,202 @@ func TestXLSXUploadImportsMultipleSheetsIntoSQLite(t *testing.T) {
 	}
 }
 
+func TestXLSXUploadSkipsLeadingTitleRowsAndRepeatedHeaders(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	workbook := excelize.NewFile()
+	workbook.SetCellValue("Sheet1", "A1", "Sales Report 2025")
+	workbook.SetCellValue("Sheet1", "A3", "order_date")
+	workbook.SetCellValue("Sheet1", "B3", "category")
+	workbook.SetCellValue("Sheet1", "C3", "amount")
+	workbook.SetCellValue("Sheet1", "A4", "2025-01-01")
+	workbook.SetCellValue("Sheet1", "B4", "A")
+	workbook.SetCellValue("Sheet1", "C4", 10)
+	workbook.SetCellValue("Sheet1", "A5", "order_date")
+	workbook.SetCellValue("Sheet1", "B5", "category")
+	workbook.SetCellValue("Sheet1", "C5", "amount")
+	workbook.SetCellValue("Sheet1", "A6", "2025-01-02")
+	workbook.SetCellValue("Sheet1", "B6", "B")
+	workbook.SetCellValue("Sheet1", "C6", 20)
+
+	var xlsx bytes.Buffer
+	if err := workbook.Write(&xlsx); err != nil {
+		t.Fatalf("failed to write xlsx workbook: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(xlsx.Bytes()); err != nil {
+		t.Fatalf("failed to write xlsx bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to count imported xlsx rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "2" {
+		t.Fatalf("expected 2 imported xlsx rows after skipping title/header noise, got %q", string(bytes.TrimSpace(rowCountOutput)))
+	}
+	sumOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT SUM(amount) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to sum imported xlsx amounts: %v", err)
+	}
+	if string(bytes.TrimSpace(sumOutput)) != "30" {
+		t.Fatalf("expected imported xlsx amount sum to be 30, got %q", string(bytes.TrimSpace(sumOutput)))
+	}
+}
+
+func TestXLSXUploadSkipsLeadingEmptyRowsAndBlankDataRows(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	workbook := excelize.NewFile()
+	workbook.SetCellValue("Sheet1", "A3", "order_date")
+	workbook.SetCellValue("Sheet1", "B3", "category")
+	workbook.SetCellValue("Sheet1", "C3", "amount")
+	workbook.SetCellValue("Sheet1", "A4", "2025-01-01")
+	workbook.SetCellValue("Sheet1", "B4", "A")
+	workbook.SetCellValue("Sheet1", "C4", 10)
+	workbook.SetCellValue("Sheet1", "A5", "")
+	workbook.SetCellValue("Sheet1", "B5", "")
+	workbook.SetCellValue("Sheet1", "C5", "")
+	workbook.SetCellValue("Sheet1", "A6", "2025-01-02")
+	workbook.SetCellValue("Sheet1", "B6", "B")
+	workbook.SetCellValue("Sheet1", "C6", 20)
+
+	var xlsx bytes.Buffer
+	if err := workbook.Write(&xlsx); err != nil {
+		t.Fatalf("failed to write xlsx workbook: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(xlsx.Bytes()); err != nil {
+		t.Fatalf("failed to write xlsx bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to count imported xlsx rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "2" {
+		t.Fatalf("expected 2 imported xlsx rows after skipping blanks, got %q", string(bytes.TrimSpace(rowCountOutput)))
+	}
+
+	queryBody := bytes.NewBufferString(`{"question":"可以生成一个柱状图吗","chart_mode":"data"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode query response: %v", err)
+	}
+	queryPlan, ok := queryResp["query_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_plan in query response")
+	}
+	if queryPlan["chart_type"] != "bar" {
+		t.Fatalf("expected chart_type bar after explicit request, got %v", queryPlan["chart_type"])
+	}
+	columns, ok := queryResp["columns"].([]any)
+	if !ok || len(columns) != 2 || columns[0] != "category" || columns[1] != "amount" {
+		t.Fatalf("expected ordered columns [category amount], got %v", queryResp["columns"])
+	}
+}
+
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 	var lastErr error
 	for i := 0; i < 5; i++ {

@@ -40,7 +40,7 @@ func importXLSXIntoSQLite(databasePath, filePath, tableName string) ([]tableSche
 		if err := execSQLite(databasePath, buildCreateTableSQL(sheetTableName, columns)); err != nil {
 			return nil, err
 		}
-		if err := insertXLSXSheetRowsInBatches(workbook, databasePath, sheet, sheetTableName, columns, xlsxInsertBatchSize); err != nil {
+		if err := insertXLSXSheetRowsInBatches(workbook, databasePath, sheet, sheetTableName, columns, headers, xlsxInsertBatchSize); err != nil {
 			return nil, err
 		}
 
@@ -64,12 +64,25 @@ func sampleXLSXSheetRows(workbook *excelize.File, sheet string, limit int) ([]st
 	}
 	defer func() { _ = rows.Close() }()
 
-	if !rows.Next() {
-		return nil, nil, nil
+	var headers []string
+	var pendingTitleRows [][]string
+	for rows.Next() {
+		columns, err := rows.Columns()
+		if err != nil {
+			return nil, nil, err
+		}
+		if isEmptySpreadsheetRow(columns) {
+			continue
+		}
+		if !looksLikeHeaderRow(columns) {
+			pendingTitleRows = append(pendingTitleRows, columns)
+			continue
+		}
+		headers = columns
+		break
 	}
-	headers, err := rows.Columns()
-	if err != nil {
-		return nil, nil, err
+	if len(headers) == 0 {
+		return nil, nil, nil
 	}
 
 	samples := make([][]string, 0, limit)
@@ -78,23 +91,44 @@ func sampleXLSXSheetRows(workbook *excelize.File, sheet string, limit int) ([]st
 		if err != nil {
 			return nil, nil, err
 		}
+		if isEmptySpreadsheetRow(columns) {
+			continue
+		}
+		if spreadsheetRowsEqual(columns, headers) {
+			continue
+		}
 		samples = append(samples, columns)
 	}
 	return headers, samples, nil
 }
 
-func insertXLSXSheetRowsInBatches(workbook *excelize.File, databasePath, sheet, tableName string, columns []schemaColumn, batchSize int) error {
+func insertXLSXSheetRowsInBatches(workbook *excelize.File, databasePath, sheet, tableName string, columns []schemaColumn, headers []string, batchSize int) error {
 	rows, err := workbook.Rows(sheet)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 
-	if !rows.Next() {
-		return nil
+	foundHeader := false
+	for rows.Next() {
+		rowValues, err := rows.Columns()
+		if err != nil {
+			return err
+		}
+		if isEmptySpreadsheetRow(rowValues) {
+			continue
+		}
+		if !looksLikeHeaderRow(rowValues) {
+			continue
+		}
+		if !spreadsheetRowsEqual(rowValues, headers) {
+			continue
+		}
+		foundHeader = true
+		break
 	}
-	if _, err := rows.Columns(); err != nil {
-		return err
+	if !foundHeader {
+		return nil
 	}
 
 	batch := make([][]string, 0, batchSize)
@@ -102,6 +136,12 @@ func insertXLSXSheetRowsInBatches(workbook *excelize.File, databasePath, sheet, 
 		values, err := rows.Columns()
 		if err != nil {
 			return err
+		}
+		if isEmptySpreadsheetRow(values) {
+			continue
+		}
+		if spreadsheetRowsEqual(values, headers) {
+			continue
 		}
 		batch = append(batch, values)
 		if len(batch) >= batchSize {
@@ -115,6 +155,45 @@ func insertXLSXSheetRowsInBatches(workbook *excelize.File, databasePath, sheet, 
 		return nil
 	}
 	return execSQLite(databasePath, buildInsertRowsSQL(tableName, columns, batch))
+}
+
+func looksLikeHeaderRow(values []string) bool {
+	nonEmpty := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			nonEmpty++
+		}
+	}
+	return nonEmpty >= 2
+}
+
+func isEmptySpreadsheetRow(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func spreadsheetRowsEqual(left, right []string) bool {
+	maxLen := len(left)
+	if len(right) > maxLen {
+		maxLen = len(right)
+	}
+	for i := 0; i < maxLen; i++ {
+		if normalizedSpreadsheetCell(left, i) != normalizedSpreadsheetCell(right, i) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizedSpreadsheetCell(values []string, index int) string {
+	if index >= len(values) {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(values[index]))
 }
 
 func deriveSheetTableName(baseTableName, sheet string, importedCount int) string {
