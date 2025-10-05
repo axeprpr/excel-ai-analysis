@@ -1603,6 +1603,124 @@ func TestXLSXUploadSkipsLeadingEmptyRowsAndBlankDataRows(t *testing.T) {
 	}
 }
 
+func TestXLSXMultiSheetQuerySelectsRelevantSheet(t *testing.T) {
+	dataDir := t.TempDir()
+	apiHandler := &Handler{dataDir: dataDir}
+	handler := http.Handler(apiHandler)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	workbook := excelize.NewFile()
+	workbook.SetCellValue("Sheet1", "A2", "order_date")
+	workbook.SetCellValue("Sheet1", "B2", "category")
+	workbook.SetCellValue("Sheet1", "C2", "amount")
+	workbook.SetCellValue("Sheet1", "A3", "2025-01-01")
+	workbook.SetCellValue("Sheet1", "B3", "A")
+	workbook.SetCellValue("Sheet1", "C3", 10)
+	workbook.SetCellValue("Sheet1", "A4", "2025-01-02")
+	workbook.SetCellValue("Sheet1", "B4", "B")
+	workbook.SetCellValue("Sheet1", "C4", 20)
+	customersSheet := "Customers"
+	if _, err := workbook.NewSheet(customersSheet); err != nil {
+		t.Fatalf("failed to create customers sheet: %v", err)
+	}
+	workbook.SetCellValue(customersSheet, "A1", "created_at")
+	workbook.SetCellValue(customersSheet, "B1", "customer_name")
+	workbook.SetCellValue(customersSheet, "C1", "customer_count")
+	workbook.SetCellValue(customersSheet, "A2", "2025-01-01")
+	workbook.SetCellValue(customersSheet, "B2", "Alice")
+	workbook.SetCellValue(customersSheet, "C2", 1)
+	workbook.SetCellValue(customersSheet, "A3", "2025-02-01")
+	workbook.SetCellValue(customersSheet, "B3", "Bob")
+	workbook.SetCellValue(customersSheet, "C3", 1)
+	emptySheet := "Notes"
+	if _, err := workbook.NewSheet(emptySheet); err != nil {
+		t.Fatalf("failed to create notes sheet: %v", err)
+	}
+
+	var xlsx bytes.Buffer
+	if err := workbook.Write(&xlsx); err != nil {
+		t.Fatalf("failed to write xlsx workbook: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "business.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(xlsx.Bytes()); err != nil {
+		t.Fatalf("failed to write xlsx bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	queryBody := bytes.NewBufferString(`{"question":"show customer trend by month","chart_mode":"data"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode query response: %v", err)
+	}
+	queryPlan, ok := queryResp["query_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_plan in query response")
+	}
+	if queryPlan["source_sheet"] != customersSheet {
+		t.Fatalf("expected source_sheet %q, got %v", customersSheet, queryPlan["source_sheet"])
+	}
+	if queryPlan["source_table"] != "business_customers" {
+		t.Fatalf("expected source_table business_customers, got %v", queryPlan["source_table"])
+	}
+	if queryPlan["mode"] != "trend" {
+		t.Fatalf("expected trend mode, got %v", queryPlan["mode"])
+	}
+	sql, _ := queryResp["sql"].(string)
+	if !strings.Contains(sql, "business_customers") {
+		t.Fatalf("expected query sql to target business_customers, got %q", sql)
+	}
+}
+
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 	var lastErr error
 	for i := 0; i < 5; i++ {
