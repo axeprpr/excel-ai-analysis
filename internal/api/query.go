@@ -154,8 +154,8 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 	visualization := map[string]any{
 		"type":             plan.ChartType,
 		"title":            req.Question,
-		"x":                pickVisualizationX(snapshot),
-		"y":                pickVisualizationY(snapshot),
+		"x":                pickVisualizationX(snapshot, plan.SourceTable),
+		"y":                pickVisualizationY(snapshot, plan.SourceTable),
 		"series":           pickVisualizationSeries(plan, snapshot),
 		"preferred_format": preferredVisualizationFormat(plan),
 		"source_table":     plan.SourceTable,
@@ -673,30 +673,44 @@ func firstTimeColumn(table tableSchema) string {
 	return ""
 }
 
-func pickVisualizationX(snapshot schemaSnapshot) string {
-	if len(snapshot.Tables) == 0 || len(snapshot.Tables[0].Columns) == 0 {
+func pickVisualizationX(snapshot schemaSnapshot, tableName string) string {
+	table := resolveVisualizationTable(snapshot, tableName)
+	if len(table.Columns) == 0 {
 		return "dimension"
 	}
 
-	for _, column := range snapshot.Tables[0].Columns {
+	for _, column := range table.Columns {
 		if !isMetricColumn(column) {
 			return column.Name
 		}
 	}
-	return snapshot.Tables[0].Columns[0].Name
+	return table.Columns[0].Name
 }
 
-func pickVisualizationY(snapshot schemaSnapshot) string {
-	if len(snapshot.Tables) == 0 || len(snapshot.Tables[0].Columns) == 0 {
+func pickVisualizationY(snapshot schemaSnapshot, tableName string) string {
+	table := resolveVisualizationTable(snapshot, tableName)
+	if len(table.Columns) == 0 {
 		return "value"
 	}
 
-	for _, column := range snapshot.Tables[0].Columns {
+	for _, column := range table.Columns {
 		if isMetricColumn(column) {
 			return column.Name
 		}
 	}
-	return snapshot.Tables[0].Columns[0].Name
+	return table.Columns[0].Name
+}
+
+func resolveVisualizationTable(snapshot schemaSnapshot, tableName string) tableSchema {
+	if tableName != "" {
+		if table := findTableByName(snapshot, tableName); table.TableName != "" {
+			return table
+		}
+	}
+	if len(snapshot.Tables) == 0 {
+		return tableSchema{}
+	}
+	return snapshot.Tables[0]
 }
 
 func isMetricColumn(column schemaColumn) bool {
@@ -747,7 +761,7 @@ func pickVisualizationSeries(plan queryPlan, snapshot schemaSnapshot) []string {
 	if len(plan.SelectedColumns) > 1 {
 		return []string{plan.SelectedColumns[len(plan.SelectedColumns)-1]}
 	}
-	y := pickVisualizationY(snapshot)
+	y := pickVisualizationY(snapshot, plan.SourceTable)
 	if y == "" {
 		return []string{}
 	}

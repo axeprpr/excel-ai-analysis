@@ -818,7 +818,33 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 
 func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	dataDir := t.TempDir()
-	handler := NewHandler(dataDir)
+	apiHandler := &Handler{dataDir: dataDir}
+	handler := http.Handler(apiHandler)
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mcpRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode mcp request: %v", err)
+		}
+		if req.Params["name"] != "generate_bar_chart" {
+			t.Fatalf("expected generate_bar_chart, got %v", req.Params["name"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result": map[string]any{
+				"content": []map[string]any{
+					{
+						"type": "text",
+						"text": "https://example.local/chart.png",
+					},
+				},
+			},
+		})
+	}))
+	defer mcpServer.Close()
+	if err := apiHandler.writeModelSettings(modelSettings{MCPServerURL: mcpServer.URL}); err != nil {
+		t.Fatalf("failed to persist test model settings: %v", err)
+	}
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
 	createRec := httptest.NewRecorder()
@@ -1097,7 +1123,7 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 		t.Fatalf("expected mermaid content to contain xychart-beta, got %q", mermaidContent)
 	}
 
-	mcpBody := bytes.NewBufferString(`{"question":"What are the top categories by sales?","chart_mode":"mcp"}`)
+	mcpBody := bytes.NewBufferString(`{"question":"可以生成一个柱状图吗","chart_mode":"mcp"}`)
 	mcpReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", mcpBody)
 	mcpReq.Header.Set("Content-Type", "application/json")
 	mcpRec := httptest.NewRecorder()
@@ -1116,6 +1142,29 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	}
 	if mcpChart["endpoint"] == "" {
 		t.Fatalf("expected mcp endpoint in chart object")
+	}
+	if mcpChart["executed"] != true {
+		t.Fatalf("expected mcp chart executed=true, got %v", mcpChart["executed"])
+	}
+	if mcpChart["tool"] != "generate_bar_chart" {
+		t.Fatalf("expected generate_bar_chart tool, got %v", mcpChart["tool"])
+	}
+	if mcpChart["url"] != "https://example.local/chart.png" {
+		t.Fatalf("expected chart url from mcp result, got %v", mcpChart["url"])
+	}
+	mcpPlan, ok := mcpResp["query_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_plan in mcp response")
+	}
+	if mcpPlan["chart_type"] != "bar" {
+		t.Fatalf("expected query_plan chart_type bar, got %v", mcpPlan["chart_type"])
+	}
+	mcpVisualization, ok := mcpResp["visualization"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected visualization in mcp response")
+	}
+	if mcpVisualization["type"] != "bar" {
+		t.Fatalf("expected visualization type bar, got %v", mcpVisualization["type"])
 	}
 
 	dbReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/database", nil)
