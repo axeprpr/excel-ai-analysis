@@ -783,96 +783,6 @@ function SystemMessage({ content }: { content: string }) {
   )
 }
 
-function DataChart({
-  rows,
-  columns,
-  chartType,
-  xKey,
-  yKey,
-}: {
-  rows: Record<string, unknown>[]
-  columns: string[]
-  chartType: string
-  xKey: string
-  yKey: string
-}) {
-  if (rows.length === 0 || columns.length === 0) {
-    return <div className="text-xs text-stone-500">没有可渲染的数据。</div>
-  }
-
-  const points = rows.slice(0, 8).map((row, index) => {
-    const x = String(row[xKey] ?? row[columns[0]] ?? `item-${index}`)
-    const y = Number(row[yKey] ?? row[columns[columns.length - 1]] ?? 0)
-    return { x, y }
-  })
-  const max = Math.max(...points.map((point) => point.y), 1)
-  const total = points.reduce((sum, point) => sum + point.y, 0)
-
-  if (chartType === "pie") {
-    return (
-      <div className="grid gap-2">
-        {points.map((point) => (
-          <div key={point.x} className="grid gap-1">
-            <div className="flex items-center justify-between text-xs text-stone-600">
-              <span>{point.x}</span>
-              <span>{total > 0 ? `${Math.round((point.y / total) * 100)}%` : "0%"}</span>
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-stone-200">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400"
-                style={{ width: `${total > 0 ? (point.y / total) * 100 : 0}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  if (chartType === "line") {
-    return (
-      <div className="grid gap-2">
-        <div className="flex items-end gap-2">
-          {points.map((point) => (
-            <div key={point.x} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-              <div className="text-[10px] text-stone-500">{point.y}</div>
-              <div className="flex h-28 w-full items-end rounded-2xl bg-white px-2 py-2">
-                <div
-                  className="w-full rounded-xl bg-gradient-to-t from-sky-500 to-cyan-300"
-                  style={{ height: `${(point.y / max) * 100}%` }}
-                />
-              </div>
-              <div className="max-w-full truncate text-[10px] text-stone-500">{point.x}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  if (chartType === "bar") {
-    return (
-      <div className="grid gap-3">
-        {points.map((point) => (
-          <div key={point.x} className="grid gap-1">
-            <div className="text-xs text-stone-600">
-              {point.x} · {point.y}
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-stone-200">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400"
-                style={{ width: `${(point.y / max) * 100}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  return <div className="text-xs text-stone-500">当前结果更适合表格展示。</div>
-}
-
 function AssistantMessage({ response }: { response: QueryResponse }) {
   const rows = response.rows || []
   const columns = response.columns || []
@@ -960,13 +870,17 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
             </pre>
           </div>
         ) : (
-          <DataChart
-            rows={rows}
-            columns={columns}
-            chartType={String(visualization.type || queryPlan?.chart_type || "table")}
-            xKey={String(visualization.x || columns[0] || "")}
-            yKey={String(visualization.y || columns[columns.length - 1] || "")}
-          />
+          <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
+            {JSON.stringify(
+              {
+                columns,
+                rows,
+                visualization,
+              },
+              null,
+              2,
+            )}
+          </pre>
         )}
       </div>
 
