@@ -102,7 +102,7 @@ func inferCSVColumnType(idx int, rows [][]string) string {
 			continue
 		}
 		value := strings.TrimSpace(row[idx])
-		if value == "" {
+		if isMissingCellValue(value) {
 			continue
 		}
 		seen = true
@@ -176,7 +176,7 @@ func buildInsertRowsSQL(tableName string, columns []schemaColumn, rows [][]strin
 }
 
 func formatSQLiteValue(value, colType string) string {
-	if value == "" {
+	if isMissingCellValue(value) {
 		return "NULL"
 	}
 
@@ -185,6 +185,15 @@ func formatSQLiteValue(value, colType string) string {
 		return value
 	default:
 		return sqliteQuote(value)
+	}
+}
+
+func isMissingCellValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "n/a", "na", "null", "-", "--":
+		return true
+	default:
+		return false
 	}
 }
 
