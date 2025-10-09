@@ -1823,6 +1823,95 @@ func TestXLSXUploadTreatsMetricPlaceholdersAsNulls(t *testing.T) {
 	}
 }
 
+func TestXLSXUploadImportsRowsAcrossBatches(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	workbook := excelize.NewFile()
+	workbook.SetCellValue("Sheet1", "A1", "order_date")
+	workbook.SetCellValue("Sheet1", "B1", "category")
+	workbook.SetCellValue("Sheet1", "C1", "amount")
+	expectedSum := 0
+	for row := 0; row < 1205; row++ {
+		line := row + 2
+		workbook.SetCellValue("Sheet1", fmt.Sprintf("A%d", line), fmt.Sprintf("2025-01-%02d", (row%28)+1))
+		workbook.SetCellValue("Sheet1", fmt.Sprintf("B%d", line), fmt.Sprintf("cat_%d", row%5))
+		value := (row % 10) + 1
+		expectedSum += value
+		workbook.SetCellValue("Sheet1", fmt.Sprintf("C%d", line), value)
+	}
+
+	var xlsx bytes.Buffer
+	if err := workbook.Write(&xlsx); err != nil {
+		t.Fatalf("failed to write xlsx workbook: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(xlsx.Bytes()); err != nil {
+		t.Fatalf("failed to write xlsx bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to count imported xlsx rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "1205" {
+		t.Fatalf("expected 1205 imported xlsx rows, got %q", string(bytes.TrimSpace(rowCountOutput)))
+	}
+
+	sumOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT SUM(amount) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to sum imported xlsx amounts: %v", err)
+	}
+	if string(bytes.TrimSpace(sumOutput)) != fmt.Sprintf("%d", expectedSum) {
+		t.Fatalf("expected imported xlsx amount sum to be %d, got %q", expectedSum, string(bytes.TrimSpace(sumOutput)))
+	}
+}
+
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 	var lastErr error
 	for i := 0; i < 5; i++ {
