@@ -514,13 +514,7 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 		t.Fatalf("expected sqlite session tables to be populated")
 	}
 
-	taskStatusOutput, err := sqliteQueryWithRetry(sessionDB, "SELECT status FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";")
-	if err != nil {
-		t.Fatalf("failed to read import task status from sqlite: %v", err)
-	}
-	if string(bytes.TrimSpace(taskStatusOutput)) != "completed" {
-		t.Fatalf("expected sqlite import task status to be completed, got %q", string(bytes.TrimSpace(taskStatusOutput)))
-	}
+	waitForSQLiteImportTaskStatus(t, sessionDB, taskID, "completed")
 
 	taskFilesOutput, err := sqliteQueryWithRetry(sessionDB, "SELECT file_names FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";")
 	if err != nil {
@@ -1912,6 +1906,95 @@ func TestXLSXUploadImportsRowsAcrossBatches(t *testing.T) {
 	}
 }
 
+func TestXLSXUploadSkipsTitleAndRepeatedHeaderRows(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	workbook := excelize.NewFile()
+	workbook.SetCellValue("Sheet1", "A1", "Sales Weekly Report")
+	workbook.SetCellValue("Sheet1", "A3", "order_date")
+	workbook.SetCellValue("Sheet1", "B3", "category")
+	workbook.SetCellValue("Sheet1", "C3", "amount")
+	workbook.SetCellValue("Sheet1", "A4", "2025-01-01")
+	workbook.SetCellValue("Sheet1", "B4", "A")
+	workbook.SetCellValue("Sheet1", "C4", 10)
+	workbook.SetCellValue("Sheet1", "A5", "order_date")
+	workbook.SetCellValue("Sheet1", "B5", "category")
+	workbook.SetCellValue("Sheet1", "C5", "amount")
+	workbook.SetCellValue("Sheet1", "A6", "2025-01-02")
+	workbook.SetCellValue("Sheet1", "B6", "B")
+	workbook.SetCellValue("Sheet1", "C6", 20)
+
+	var xlsx bytes.Buffer
+	if err := workbook.Write(&xlsx); err != nil {
+		t.Fatalf("failed to write xlsx workbook: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.xlsx")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(xlsx.Bytes()); err != nil {
+		t.Fatalf("failed to write xlsx bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to count imported xlsx rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "2" {
+		t.Fatalf("expected only 2 data rows after skipping title and repeated header rows, got %q", string(bytes.TrimSpace(rowCountOutput)))
+	}
+	sumOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT SUM(amount) FROM "sales";`)
+	if err != nil {
+		t.Fatalf("failed to sum imported xlsx amounts: %v", err)
+	}
+	if string(bytes.TrimSpace(sumOutput)) != "30" {
+		t.Fatalf("expected imported xlsx amount sum to be 30, got %q", string(bytes.TrimSpace(sumOutput)))
+	}
+}
+
 func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 	var lastErr error
 	for i := 0; i < 5; i++ {
@@ -1928,6 +2011,22 @@ func sqliteQueryWithRetry(databasePath, sql string) ([]byte, error) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("sqlite query failed after retries: %w", lastErr)
+}
+
+func waitForSQLiteImportTaskStatus(t *testing.T, databasePath, taskID, wantStatus string) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		output, err := sqliteQueryWithRetry(databasePath, "SELECT status FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";")
+		if err == nil && string(bytes.TrimSpace(output)) == wantStatus {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	output, err := sqliteQueryWithRetry(databasePath, "SELECT status FROM import_tasks WHERE task_id="+sqliteQuote(taskID)+";")
+	if err != nil {
+		t.Fatalf("failed to read import task status from sqlite: %v", err)
+	}
+	t.Fatalf("expected sqlite import task status to be %q, got %q", wantStatus, string(bytes.TrimSpace(output)))
 }
 
 func TestChatUploadAutoCreatesSessionAndReturnsAnswer(t *testing.T) {
