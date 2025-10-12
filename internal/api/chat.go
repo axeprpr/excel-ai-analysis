@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const maxMultipartFormMemory = 256 << 20
+
 type chatQueryRequest struct {
 	SessionID string `json:"session_id"`
 	Question  string `json:"question"`
@@ -21,7 +23,7 @@ func (h *Handler) handleChatUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	if err := r.ParseMultipartForm(maxMultipartFormMemory); err != nil {
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}

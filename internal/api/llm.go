@@ -39,8 +39,7 @@ type openAIChatResponse struct {
 }
 
 func llmEnabled(settings modelSettings) bool {
-	return strings.TrimSpace(settings.Provider) != "" &&
-		strings.TrimSpace(settings.Model) != "" &&
+	return strings.TrimSpace(settings.Model) != "" &&
 		strings.TrimSpace(settings.BaseURL) != "" &&
 		strings.TrimSpace(settings.APIKey) != ""
 }
@@ -50,11 +49,27 @@ func (h *Handler) generateSQLWithLLM(settings modelSettings, req llmSQLRequest) 
 		return llmSQLResponse{}, errors.New("llm settings are incomplete")
 	}
 
-	switch strings.ToLower(strings.TrimSpace(settings.Provider)) {
+	switch resolveLLMProvider(settings) {
 	case "openai", "openai-compatible":
 		return h.generateSQLWithOpenAICompatible(settings, req)
 	default:
 		return llmSQLResponse{}, errors.New("unsupported llm provider")
+	}
+}
+
+func resolveLLMProvider(settings modelSettings) string {
+	provider := strings.ToLower(strings.TrimSpace(settings.Provider))
+	switch provider {
+	case "", "openai", "openai-compatible":
+		if provider == "" {
+			return "openai-compatible"
+		}
+		return provider
+	default:
+		if strings.HasPrefix(provider, "http://") || strings.HasPrefix(provider, "https://") {
+			return "openai-compatible"
+		}
+		return provider
 	}
 }
 

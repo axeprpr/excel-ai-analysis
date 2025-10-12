@@ -123,3 +123,23 @@ func TestBuildLLMSQLPromptIncludesRepairContext(t *testing.T) {
 		t.Fatalf("expected repair prompt to request sql repair")
 	}
 }
+
+func TestResolveLLMProviderTreatsBaseURLLikeOpenAICompatible(t *testing.T) {
+	provider := resolveLLMProvider(modelSettings{
+		Provider: "http://f.axe3.cn:22225/v1",
+		Model:    "minimax-m2",
+		BaseURL:  "http://f.axe3.cn:22225",
+		APIKey:   "test-key",
+	})
+	if provider != "openai-compatible" {
+		t.Fatalf("expected openai-compatible provider, got %q", provider)
+	}
+	if !llmEnabled(modelSettings{
+		Provider: "http://f.axe3.cn:22225/v1",
+		Model:    "minimax-m2",
+		BaseURL:  "http://f.axe3.cn:22225",
+		APIKey:   "test-key",
+	}) {
+		t.Fatalf("expected llmEnabled to accept base-url-style provider values")
+	}
+}
