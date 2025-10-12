@@ -46,7 +46,6 @@ type Settings = {
   embedding_base_url: string
   embedding_api_key: string
   default_chart_mode: "data" | "mermaid" | "mcp"
-  mcp_server_url: string
 }
 
 type PlannedFilter = {
@@ -135,7 +134,6 @@ const initialSettings: Settings = {
   embedding_base_url: "",
   embedding_api_key: "",
   default_chart_mode: "data",
-  mcp_server_url: "http://chart-mcp:1122/mcp",
 }
 
 mermaid.initialize({
