@@ -166,7 +166,13 @@ func OpenAPISpec() map[string]any {
 							"content": map[string]any{
 								"application/json": map[string]any{
 									"schema": map[string]any{
-										"$ref": "#/components/schemas/QueryResponse",
+										"type": "object",
+										"properties": map[string]any{
+											"session_id": map[string]any{"type": "string"},
+											"answer": map[string]any{
+												"$ref": "#/components/schemas/QueryResponse",
+											},
+										},
 									},
 								},
 							},
