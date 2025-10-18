@@ -268,11 +268,11 @@ The frontend is chat-first:
 
 Chart rendering behavior:
 
-- `data` mode: inline visual card rendering based on returned data
+- `data` mode: structured JSON data only, intended for downstream rendering
 - `mermaid` mode: Mermaid content rendered directly into SVG in the chat
-- `mcp` mode: MCP payload and endpoint info shown for downstream chart execution
+- `mcp` mode: backend-executed local chart generation through the MCP sidecar
 
-The legacy `GET /console` page still exists, but it is not the primary UI.
+The legacy `GET /console` page has been retired. The `frontend/` chat workspace is the active UI.
 
 ### Chart MCP Sidecar
 
@@ -296,7 +296,6 @@ Implemented top-level routes:
 
 - `GET /`
 - `GET /openapi.json`
-- `GET /console`
 - `GET /healthz`
 - `GET /readyz`
 - `GET /api/status`
@@ -340,12 +339,18 @@ Current stored settings include:
 - `model`
 - `base_url`
 - `api_key`
+- `embedding_provider`
+- `embedding_model`
+- `embedding_base_url`
+- `embedding_api_key`
 - `default_chart_mode`
 - `mcp_server_url`
 
-These settings are stored locally and are currently used as configuration input rather than as a fully wired LLM execution layer.
+These settings are stored locally and are actively used by the query stack.
 
 If `provider`, `model`, `base_url`, and `api_key` are all configured, the query layer will first try an OpenAI-compatible SQL generation request and then fall back to the built-in planner if that request fails or returns unsafe SQL.
+
+If `embedding_provider`, `embedding_model`, and `embedding_base_url` are configured, the planner will also run embedding-based schema retrieval before SQL planning. If remote embedding retrieval fails, the service falls back to a local embedding strategy rather than failing the query outright.
 
 ### Session APIs
 
