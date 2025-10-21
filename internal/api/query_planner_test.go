@@ -206,3 +206,63 @@ func TestBuildSQLPlanUsesBusinessConceptSynonyms(t *testing.T) {
 		t.Fatalf("expected customer query to select customers, got %q", plan.SourceTable)
 	}
 }
+
+func TestBuildCSVColumnsPreservesChineseHeadersAndSemantics(t *testing.T) {
+	headers := []string{"时间", "网页标题", "URL分类", "目的端口"}
+	rows := [][]string{
+		{"2026/3/26 14:54", "高德地图", "旅游", "443"},
+		{"2026/3/26 14:54", "支付宝", "网上交易", "443"},
+	}
+
+	columns := buildCSVColumns(headers, rows)
+	if len(columns) != 4 {
+		t.Fatalf("expected 4 columns, got %d", len(columns))
+	}
+	if columns[0].Name != "时间" || columns[0].Semantic != "time" {
+		t.Fatalf("expected 时间 to remain a time column, got %#v", columns[0])
+	}
+	if columns[2].Name != "url分类" || columns[2].Semantic != "dimension" {
+		t.Fatalf("expected URL分类 to remain a dimension column, got %#v", columns[2])
+	}
+	if columns[3].Name != "目的端口" || columns[3].Semantic != "dimension" {
+		t.Fatalf("expected 目的端口 to be treated as a dimension-like identifier, got %#v", columns[3])
+	}
+}
+
+func TestBuildSQLPlanUsesCategoryCountsForChineseDistributionQuestions(t *testing.T) {
+	table := tableSchema{
+		TableName:   "web_browsing",
+		SourceFile:  "web_browsing_complex.xlsx",
+		SourceSheet: "浏览明细",
+		Columns: []schemaColumn{
+			{Name: "时间", Type: "TEXT", Semantic: "time"},
+			{Name: "用户", Type: "TEXT", Semantic: "dimension"},
+			{Name: "网页标题", Type: "TEXT", Semantic: "dimension"},
+			{Name: "url分类", Type: "TEXT", Semantic: "dimension"},
+			{Name: "目的端口", Type: "INTEGER", Semantic: "dimension"},
+		},
+	}
+	snapshot := schemaSnapshot{Tables: []tableSchema{table}}
+
+	intent := detectQueryIntent("帮我做个网页浏览的分布饼图", table)
+	plan := buildSQLPlan(snapshot, "帮我做个网页浏览的分布饼图", intent)
+
+	if plan.Mode != "share" {
+		t.Fatalf("expected share mode for distribution pie chart, got %q", plan.Mode)
+	}
+	if plan.ChartType != "pie" {
+		t.Fatalf("expected pie chart type, got %q", plan.ChartType)
+	}
+	if plan.DimensionColumn != "url分类" {
+		t.Fatalf("expected planner to choose url分类, got %q", plan.DimensionColumn)
+	}
+	if strings.Contains(plan.SQL, "目的端口") {
+		t.Fatalf("expected planner to avoid 目的端口 as metric, got %q", plan.SQL)
+	}
+	if !strings.Contains(plan.SQL, "COUNT(*) AS total_count") {
+		t.Fatalf("expected share sql to fall back to row counts, got %q", plan.SQL)
+	}
+	if !strings.Contains(plan.SQL, "GROUP BY url分类") {
+		t.Fatalf("expected share sql to group by url分类, got %q", plan.SQL)
+	}
+}

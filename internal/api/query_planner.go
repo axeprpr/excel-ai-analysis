@@ -96,9 +96,9 @@ func buildSQLPlanForSelection(snapshot schemaSnapshot, question string, intent q
 	if table.TableName == "" {
 		table = snapshot.Tables[0]
 	}
-	dimension := firstDimensionColumn(table)
-	metric := firstMetricColumn(table)
-	timeColumn := firstTimeColumn(table)
+	dimension := bestDimensionColumn(table, question, intent)
+	metric := bestMetricColumn(table, question, intent)
+	timeColumn := bestTimeColumn(table, question, intent)
 	filters := planFilters(table, intent)
 	return sqlPlan{
 		SourceTable:        table.TableName,
@@ -114,8 +114,8 @@ func buildSQLPlanForSelection(snapshot schemaSnapshot, question string, intent q
 		TimeColumn:         timeColumn,
 		FilterHints:        intent.FilterHints,
 		Filters:            filters,
-		SelectedColumns:    selectedColumnsForMode(table, intent.Mode),
-		SQL:                buildSQLForIntent(table, intent, filters),
+		SelectedColumns:    selectedColumnsForPlan(intent.Mode, dimension, metric, timeColumn),
+		SQL:                buildSQLForIntent(table.TableName, intent, filters, dimension, metric, timeColumn),
 	}
 }
 
@@ -342,47 +342,162 @@ func selectionReason(scored []scoredTable) string {
 	return "selected the highest-scoring table based on question, file, and column matches"
 }
 
-func buildSQLForIntent(table tableSchema, intent queryIntent, filters []plannedFilter) string {
-	dimension := firstDimensionColumn(table)
-	metric := firstMetricColumn(table)
+func buildSQLForIntent(tableName string, intent queryIntent, filters []plannedFilter, dimension, metric, timeColumn string) string {
 	whereClause := buildWhereClause(filters)
 
 	switch intent.Mode {
 	case "count":
-		return "SELECT COUNT(*) AS total_count FROM " + table.TableName + whereClause + ";"
+		return "SELECT COUNT(*) AS total_count FROM " + tableName + whereClause + ";"
 	case "trend":
-		timeColumn := firstTimeColumn(table)
 		if timeColumn != "" && metric != "" {
-			return buildTrendSQL(table.TableName, timeColumn, metric, intent.TimeGranularity, whereClause)
+			return buildTrendSQL(tableName, timeColumn, metric, intent.TimeGranularity, whereClause)
 		}
 	case "share":
 		if dimension != "" && metric != "" {
-			return "SELECT " + dimension + ", ROUND(100.0 * SUM(" + metric + ") / SUM(SUM(" + metric + ")) OVER (), 2) AS share_value FROM " + table.TableName +
+			return "SELECT " + dimension + ", ROUND(100.0 * SUM(" + metric + ") / SUM(SUM(" + metric + ")) OVER (), 2) AS share_value FROM " + tableName +
 				whereClause + " GROUP BY " + dimension + " ORDER BY share_value DESC LIMIT 20;"
 		}
+		if dimension != "" {
+			return "SELECT " + dimension + ", COUNT(*) AS total_count, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS share_value FROM " + tableName +
+				whereClause + " GROUP BY " + dimension + " ORDER BY total_count DESC LIMIT 20;"
+		}
 	case "compare":
-		if timeColumn := firstTimeColumn(table); intent.ComparisonType != "" && timeColumn != "" && metric != "" {
-			return buildTimeComparisonSQL(table.TableName, timeColumn, metric, intent.ComparisonType, whereClause)
+		if intent.ComparisonType != "" && timeColumn != "" && metric != "" {
+			return buildTimeComparisonSQL(tableName, timeColumn, metric, intent.ComparisonType, whereClause)
 		}
 		if dimension != "" && metric != "" {
-			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +
+			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + tableName +
 				whereClause + " GROUP BY " + dimension + " ORDER BY " + dimension + " ASC LIMIT 20;"
+		}
+		if dimension != "" {
+			return "SELECT " + dimension + ", COUNT(*) AS total_value FROM " + tableName +
+				whereClause + " GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 20;"
 		}
 	case "topn":
 		if dimension != "" && metric != "" {
-			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + table.TableName +
+			return "SELECT " + dimension + ", SUM(" + metric + ") AS total_value FROM " + tableName +
+				whereClause + " GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 10;"
+		}
+		if dimension != "" {
+			return "SELECT " + dimension + ", COUNT(*) AS total_value FROM " + tableName +
 				whereClause + " GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 10;"
 		}
 	case "aggregate":
 		if metric != "" {
-			return "SELECT SUM(" + metric + ") AS total_value FROM " + table.TableName + whereClause + ";"
+			return "SELECT SUM(" + metric + ") AS total_value FROM " + tableName + whereClause + ";"
 		}
 	}
 
 	if dimension != "" && metric != "" {
-		return "SELECT " + dimension + ", " + metric + " FROM " + table.TableName + whereClause + " LIMIT 100;"
+		return "SELECT " + dimension + ", " + metric + " FROM " + tableName + whereClause + " LIMIT 100;"
 	}
-	return buildPlaceholderSQL(schemaSnapshot{Tables: []tableSchema{table}})
+	if dimension != "" {
+		return "SELECT " + dimension + ", COUNT(*) AS total_count FROM " + tableName + whereClause + " GROUP BY " + dimension + " ORDER BY total_count DESC LIMIT 100;"
+	}
+	return buildPlaceholderSQL(schemaSnapshot{Tables: []tableSchema{{TableName: tableName}}})
+}
+
+func bestDimensionColumn(table tableSchema, question string, intent queryIntent) string {
+	bestScore := -1
+	bestColumn := ""
+	for _, column := range table.Columns {
+		if isMetricColumn(column) || isTimeColumn(column) {
+			continue
+		}
+		score := dimensionColumnScore(question, intent, column)
+		if score > bestScore {
+			bestScore = score
+			bestColumn = column.Name
+		}
+	}
+	if bestColumn != "" {
+		return bestColumn
+	}
+	return firstDimensionColumn(table)
+}
+
+func bestMetricColumn(table tableSchema, question string, intent queryIntent) string {
+	bestScore := -1
+	bestColumn := ""
+	for _, column := range table.Columns {
+		if !isMetricColumn(column) {
+			continue
+		}
+		score := metricColumnScore(question, intent, column)
+		if score > bestScore {
+			bestScore = score
+			bestColumn = column.Name
+		}
+	}
+	if bestColumn != "" && bestScore > 0 {
+		return bestColumn
+	}
+	if intent.Mode == "share" {
+		return ""
+	}
+	return firstMetricColumn(table)
+}
+
+func bestTimeColumn(table tableSchema, _ string, _ queryIntent) string {
+	return firstTimeColumn(table)
+}
+
+func dimensionColumnScore(question string, intent queryIntent, column schemaColumn) int {
+	name := strings.ToLower(column.Name)
+	score := countTokenMatches(strings.ToLower(question), normalizeNameTokens(column.Name)) * 3
+
+	if intent.Share || intent.ChartType == "pie" {
+		if containsAny(name, []string{"category", "type", "group", "class", "分类", "类型", "分组", "级别"}) {
+			score += 8
+		}
+	}
+	if containsAny(strings.ToLower(question), []string{"网页", "浏览", "url", "网站"}) {
+		if containsAny(name, []string{"url分类", "url_分类", "分类"}) {
+			score += 10
+		}
+		if containsAny(name, []string{"网页标题", "网页_标题", "title"}) {
+			score += 5
+		}
+		if containsAny(name, []string{"url"}) {
+			score += 4
+		}
+	}
+	if containsAny(strings.ToLower(question), []string{"用户", "user"}) &&
+		containsAny(name, []string{"用户", "user", "customer"}) {
+		score += 5
+	}
+	if containsAny(strings.ToLower(question), []string{"终端", "device", "client"}) &&
+		containsAny(name, []string{"终端", "device", "client"}) {
+		score += 5
+	}
+	if containsAny(strings.ToLower(question), []string{"级别", "level"}) &&
+		containsAny(name, []string{"级别", "level"}) {
+		score += 5
+	}
+	if strings.Contains(name, "url") && !strings.Contains(name, "分类") && intent.Share {
+		score -= 2
+	}
+	return score
+}
+
+func metricColumnScore(question string, intent queryIntent, column schemaColumn) int {
+	name := strings.ToLower(column.Name)
+	score := countTokenMatches(strings.ToLower(question), normalizeNameTokens(column.Name)) * 3
+	if containsAny(strings.ToLower(question), []string{"sum", "total", "amount", "金额", "总额", "数量", "次数"}) &&
+		containsAny(name, []string{"amount", "total", "count", "quantity", "数量", "次数", "金额"}) {
+		score += 8
+	}
+	if containsAny(strings.ToLower(question), []string{"sales", "revenue", "gmv", "成交额", "销售额", "营收"}) &&
+		containsAny(name, []string{"amount", "revenue", "gmv", "sales", "total", "金额", "销售额", "营收"}) {
+		score += 8
+	}
+	if intent.Mode == "detail" && intent.ChartType == "pie" {
+		score -= 2
+	}
+	if containsAny(name, []string{"port", "端口", "id", "编号", "用户组"}) {
+		score -= 5
+	}
+	return score
 }
 
 func buildTimeComparisonSQL(tableName, timeColumn, metric, comparisonType, whereClause string) string {

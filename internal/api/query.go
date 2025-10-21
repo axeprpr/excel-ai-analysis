@@ -154,8 +154,8 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 	visualization := map[string]any{
 		"type":             plan.ChartType,
 		"title":            req.Question,
-		"x":                pickVisualizationX(snapshot, plan.SourceTable),
-		"y":                pickVisualizationY(snapshot, plan.SourceTable),
+		"x":                pickVisualizationX(plan, snapshot),
+		"y":                pickVisualizationY(plan, snapshot),
 		"series":           pickVisualizationSeries(plan, snapshot),
 		"preferred_format": preferredVisualizationFormat(plan),
 		"source_table":     plan.SourceTable,
@@ -200,8 +200,12 @@ func (h *Handler) repairQueryPlanWithLLM(settings modelSettings, snapshot schema
 	repairedPlan.SQL = strings.TrimSpace(llmResp.SQL)
 	if mode := normalizeIntentMode(llmResp.Mode); mode != "" {
 		repairedPlan.Mode = mode
-		if len(snapshot.Tables) > 0 {
-			repairedPlan.SelectedColumns = selectedColumnsForMode(snapshot.Tables[0], mode)
+		table := findTableByName(snapshot, repairedPlan.SourceTable)
+		if table.TableName == "" && len(snapshot.Tables) > 0 {
+			table = snapshot.Tables[0]
+		}
+		if table.TableName != "" {
+			repairedPlan.SelectedColumns = selectedColumnsForPlan(mode, repairedPlan.DimensionColumn, repairedPlan.MetricColumn, repairedPlan.TimeColumn)
 		}
 	}
 	repairedPlan.SelectionReason = "repaired by the configured LLM provider after a SQLite execution error"
@@ -241,7 +245,7 @@ func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, snapshot sc
 		CandidateTables:    []string{table.TableName},
 		PlanningConfidence: 1,
 		SelectionReason:    "selected by LLM-generated SQL against the current schema snapshot",
-		SelectedColumns:    selectedColumnsForMode(table, mode),
+		SelectedColumns:    selectedColumnsForPlan(mode, firstDimensionColumn(table), firstMetricColumn(table), firstTimeColumn(table)),
 		Filters:            []string{},
 		Question:           question,
 		ChartType:          heuristicPlan.ChartType,
@@ -579,30 +583,27 @@ func normalizeSimilarityScore(score float64) float64 {
 	return score
 }
 
-func selectedColumnsForMode(table tableSchema, mode string) []string {
-	dimension := firstDimensionColumn(table)
-	metric := firstMetricColumn(table)
-
+func selectedColumnsForPlan(mode, dimension, metric, timeColumn string) []string {
 	switch mode {
 	case "count":
 		return []string{"total_count"}
 	case "trend":
-		if firstTimeColumn(table) != "" && metric != "" {
+		if timeColumn != "" && metric != "" {
 			return []string{"time_bucket", "total_value"}
 		}
 	case "share":
-		if dimension != "" && metric != "" {
+		if dimension != "" {
 			return []string{dimension, "share_value"}
 		}
 	case "compare":
-		if firstTimeColumn(table) != "" && metric != "" {
+		if timeColumn != "" && metric != "" {
 			return []string{"compare_period", "total_value"}
 		}
-		if dimension != "" && metric != "" {
+		if dimension != "" {
 			return []string{dimension, "total_value"}
 		}
 	case "topn":
-		if dimension != "" && metric != "" {
+		if dimension != "" {
 			return []string{dimension, "total_value"}
 		}
 	case "aggregate":
@@ -614,7 +615,14 @@ func selectedColumnsForMode(table tableSchema, mode string) []string {
 	if dimension != "" && metric != "" {
 		return []string{dimension, metric}
 	}
-	return columnNames(table.Columns)
+	if dimension != "" {
+		return []string{dimension, "total_count"}
+	}
+	return []string{}
+}
+
+func selectedColumnsForMode(table tableSchema, mode string) []string {
+	return selectedColumnsForPlan(mode, firstDimensionColumn(table), firstMetricColumn(table), firstTimeColumn(table))
 }
 
 func columnNames(columns []schemaColumn) []string {
@@ -673,8 +681,11 @@ func firstTimeColumn(table tableSchema) string {
 	return ""
 }
 
-func pickVisualizationX(snapshot schemaSnapshot, tableName string) string {
-	table := resolveVisualizationTable(snapshot, tableName)
+func pickVisualizationX(plan queryPlan, snapshot schemaSnapshot) string {
+	if strings.TrimSpace(plan.DimensionColumn) != "" {
+		return plan.DimensionColumn
+	}
+	table := resolveVisualizationTable(snapshot, plan.SourceTable)
 	if len(table.Columns) == 0 {
 		return "dimension"
 	}
@@ -687,8 +698,19 @@ func pickVisualizationX(snapshot schemaSnapshot, tableName string) string {
 	return table.Columns[0].Name
 }
 
-func pickVisualizationY(snapshot schemaSnapshot, tableName string) string {
-	table := resolveVisualizationTable(snapshot, tableName)
+func pickVisualizationY(plan queryPlan, snapshot schemaSnapshot) string {
+	switch plan.Mode {
+	case "share":
+		return "share_value"
+	case "count":
+		return "total_count"
+	case "aggregate", "compare", "trend", "topn":
+		return "total_value"
+	}
+	if strings.TrimSpace(plan.MetricColumn) != "" {
+		return plan.MetricColumn
+	}
+	table := resolveVisualizationTable(snapshot, plan.SourceTable)
 	if len(table.Columns) == 0 {
 		return "value"
 	}
@@ -761,7 +783,7 @@ func pickVisualizationSeries(plan queryPlan, snapshot schemaSnapshot) []string {
 	if len(plan.SelectedColumns) > 1 {
 		return []string{plan.SelectedColumns[len(plan.SelectedColumns)-1]}
 	}
-	y := pickVisualizationY(snapshot, plan.SourceTable)
+	y := pickVisualizationY(plan, snapshot)
 	if y == "" {
 		return []string{}
 	}

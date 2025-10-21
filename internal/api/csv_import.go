@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 func importCSVIntoSQLite(databasePath, filePath, tableName string) (tableSchema, error) {
@@ -57,7 +58,7 @@ func buildCSVColumns(headers []string, rows [][]string) []schemaColumn {
 }
 
 func normalizeColumnName(header string, idx int, used map[string]int) string {
-	base := strings.ToLower(strings.TrimSpace(header))
+	base := strings.TrimSpace(strings.ToLower(header))
 	if base == "" {
 		base = fmt.Sprintf("column_%d", idx+1)
 	}
@@ -66,10 +67,10 @@ func normalizeColumnName(header string, idx int, used map[string]int) string {
 	lastUnderscore := false
 	for _, r := range base {
 		switch {
-		case r >= 'a' && r <= 'z':
+		case unicode.IsLetter(r):
 			b.WriteRune(r)
 			lastUnderscore = false
-		case r >= '0' && r <= '9':
+		case unicode.IsDigit(r):
 			b.WriteRune(r)
 			lastUnderscore = false
 		default:
@@ -129,9 +130,27 @@ func inferCSVColumnType(idx int, rows [][]string) string {
 func inferColumnSemantic(name, colType string) string {
 	lower := strings.ToLower(name)
 	switch {
-	case strings.Contains(lower, "date"), strings.Contains(lower, "time"), strings.Contains(lower, "month"):
+	case containsAny(lower, []string{
+		"date", "time", "month", "year", "day",
+		"日期", "时间", "年月", "月份", "年度", "天",
+	}):
 		return "time"
 	case colType == "INTEGER" || colType == "REAL":
+		if containsAny(lower, []string{
+			"id", "code", "port", "user_group",
+			"编号", "代码", "端口", "用户组", "序号",
+		}) {
+			return "dimension"
+		}
+		if containsAny(lower, []string{
+			"amount", "revenue", "price", "total", "count", "qty", "quantity", "score", "value",
+			"金额", "价格", "总额", "总量", "数量", "次数", "分数", "值", "占比",
+		}) {
+			return "metric"
+		}
+		if strings.HasPrefix(lower, "column_") {
+			return "metric"
+		}
 		return "metric"
 	default:
 		return "dimension"

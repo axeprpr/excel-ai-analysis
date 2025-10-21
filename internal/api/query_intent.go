@@ -47,7 +47,7 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 			intent.TimeGranularity = "month"
 		}
 	}
-	if hasAny(q, "占比", "比例", "share", "distribution", "composition") {
+	if hasAny(q, "占比", "比例", "分布", "构成", "share", "distribution", "composition") {
 		intent.Share = true
 		intent.Mode = "share"
 		intent.ChartType = "pie"
