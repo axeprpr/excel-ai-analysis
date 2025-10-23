@@ -3,12 +3,15 @@ package api
 import (
 	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
 )
+
+const csvInsertBatchSize = 500
 
 func importCSVIntoSQLite(databasePath, filePath, tableName string) (tableSchema, error) {
 	file, err := os.Open(filePath)
@@ -18,19 +21,25 @@ func importCSVIntoSQLite(databasePath, filePath, tableName string) (tableSchema,
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
+	headers, err := reader.Read()
+	if err != nil {
+		if err == io.EOF {
+			return tableSchema{}, fmt.Errorf("csv file is empty")
+		}
+		return tableSchema{}, err
+	}
+
+	sampleRows, err := readCSVSampleRows(reader, 1000)
 	if err != nil {
 		return tableSchema{}, err
 	}
-	if len(records) == 0 {
-		return tableSchema{}, fmt.Errorf("csv file is empty")
-	}
 
-	rawHeaders := records[0]
-	columns := buildCSVColumns(rawHeaders, records[1:])
+	columns := buildCSVColumns(headers, sampleRows)
 	createSQL := buildCreateTableSQL(tableName, columns)
-	insertSQL := buildInsertRowsSQL(tableName, columns, records[1:])
-	if err := execSQLite(databasePath, createSQL+"\n"+insertSQL); err != nil {
+	if err := execSQLite(databasePath, createSQL); err != nil {
+		return tableSchema{}, err
+	}
+	if err := insertCSVRowsInBatches(databasePath, filePath, tableName, columns, csvInsertBatchSize); err != nil {
 		return tableSchema{}, err
 	}
 
@@ -40,6 +49,57 @@ func importCSVIntoSQLite(databasePath, filePath, tableName string) (tableSchema,
 		SourceSheet: "csv",
 		Columns:     columns,
 	}, nil
+}
+
+func readCSVSampleRows(reader *csv.Reader, limit int) ([][]string, error) {
+	samples := make([][]string, 0, limit)
+	for len(samples) < limit {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		samples = append(samples, record)
+	}
+	return samples, nil
+}
+
+func insertCSVRowsInBatches(databasePath, filePath, tableName string, columns []schemaColumn, batchSize int) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	if _, err := reader.Read(); err != nil {
+		return err
+	}
+
+	batch := make([][]string, 0, batchSize)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		batch = append(batch, record)
+		if len(batch) >= batchSize {
+			if err := execSQLite(databasePath, buildInsertRowsSQL(tableName, columns, batch)); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+
+	if len(batch) == 0 {
+		return nil
+	}
+	return execSQLite(databasePath, buildInsertRowsSQL(tableName, columns, batch))
 }
 
 func buildCSVColumns(headers []string, rows [][]string) []schemaColumn {

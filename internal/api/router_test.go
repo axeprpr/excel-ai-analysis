@@ -291,7 +291,7 @@ func TestXLSUploadReturnsPlaceholderWarning(t *testing.T) {
 		t.Fatalf("expected upload file extension to be .xls, got %v", firstFile["extension"])
 	}
 
-	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 400, 25*time.Millisecond)
 
 	importReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
 	importRec := httptest.NewRecorder()
@@ -1226,6 +1226,92 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 	}
 	if sessionResp["total_row_count"] != float64(2) {
 		t.Fatalf("expected session total_row_count to be 2, got %v", sessionResp["total_row_count"])
+	}
+}
+
+func TestCSVUploadImportsLargeFilesAcrossBatches(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	var csvBuilder strings.Builder
+	csvBuilder.WriteString("visit_time,user_id,url_category,page_title,url\n")
+	categories := []string{"在线聊天", "网上交易", "门户网站与搜索引擎", "新闻媒体", "娱乐", "社会生活", "旅游"}
+	expectedRows := 50000
+	for i := 0; i < expectedRows; i++ {
+		fmt.Fprintf(
+			&csvBuilder,
+			"2026-03-27 09:%02d:00,user_%d,%s,title_%d,https://example.com/%d\n",
+			i%60,
+			i,
+			categories[i%len(categories)],
+			i,
+			i,
+		)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "large_50000.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(csvBuilder.String())); err != nil {
+		t.Fatalf("failed to write csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusAccepted, uploadRec.Code, uploadRec.Body.String())
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "large_50000";`)
+	if err != nil {
+		t.Fatalf("failed to count imported csv rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "50000" {
+		t.Fatalf("expected 50000 imported csv rows, got %q", string(bytes.TrimSpace(rowCountOutput)))
+	}
+
+	topCategoryOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT url_category, COUNT(*) FROM "large_50000" GROUP BY url_category ORDER BY COUNT(*) DESC, url_category ASC LIMIT 1;`)
+	if err != nil {
+		t.Fatalf("failed to aggregate imported csv rows: %v", err)
+	}
+	if !strings.Contains(string(topCategoryOutput), "|7143") {
+		t.Fatalf("expected top category count around 7143, got %q", string(bytes.TrimSpace(topCategoryOutput)))
 	}
 }
 
@@ -2176,15 +2262,19 @@ func TestChatQueryUsesExistingSession(t *testing.T) {
 
 func waitForImportTaskStatus(t *testing.T, handler http.Handler, sessionID, taskID, wantStatus string) {
 	t.Helper()
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, wantStatus, 60, 20*time.Millisecond)
+}
 
+func waitForImportTaskStatusWithTimeout(t *testing.T, handler http.Handler, sessionID, taskID, wantStatus string, maxAttempts int, delay time.Duration) {
+	t.Helper()
 	var lastStatus string
-	for i := 0; i < 60; i++ {
+	for i := 0; i < maxAttempts; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/imports/"+taskID, nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
 		if rec.Code == http.StatusInternalServerError {
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(delay)
 			continue
 		}
 		if rec.Code != http.StatusOK {
@@ -2205,7 +2295,7 @@ func waitForImportTaskStatus(t *testing.T, handler http.Handler, sessionID, task
 			t.Fatalf("import task failed: %v", importResp["error"])
 		}
 
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(delay)
 	}
 
 	t.Fatalf("import task did not reach %q in time, last status %q", wantStatus, lastStatus)
