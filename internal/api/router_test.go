@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xuri/excelize/v2"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 func TestCreateAndListSessions(t *testing.T) {
@@ -1312,6 +1313,89 @@ func TestCSVUploadImportsLargeFilesAcrossBatches(t *testing.T) {
 	}
 	if !strings.Contains(string(topCategoryOutput), "|7143") {
 		t.Fatalf("expected top category count around 7143, got %q", string(bytes.TrimSpace(topCategoryOutput)))
+	}
+}
+
+func TestCSVUploadImportsGBKEncodedChineseCSV(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	utf8CSV := "时间,用户,URL分类,目的端口\n2026-03-26 14:54:07,3241020131@cmcc,旅游,443\n2026-03-26 14:54:07,3254130505,门户网站与搜索引擎,443\n2026-03-26 14:54:07,3256220315@telecom,网上交易,443\n"
+	gbkCSV, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte(utf8CSV))
+	if err != nil {
+		t.Fatalf("failed to encode test csv as gb18030: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "webaccess.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(gbkCSV); err != nil {
+		t.Fatalf("failed to write encoded csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusAccepted, uploadRec.Code, uploadRec.Body.String())
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+
+	queryBody := bytes.NewBufferString(`{"question":"帮我做个网页浏览的分布饼图","chart_mode":"data"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode query response: %v", err)
+	}
+	queryPlan, ok := queryResp["query_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_plan in query response")
+	}
+	if queryPlan["dimension_column"] != "url分类" {
+		t.Fatalf("expected url分类 dimension column, got %v", queryPlan["dimension_column"])
+	}
+	if queryPlan["mode"] != "share" {
+		t.Fatalf("expected share mode, got %v", queryPlan["mode"])
 	}
 }
 

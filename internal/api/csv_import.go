@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -9,12 +11,16 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 const csvInsertBatchSize = 500
 
 func importCSVIntoSQLite(databasePath, filePath, tableName string) (tableSchema, error) {
-	file, err := os.Open(filePath)
+	file, err := openCSVFile(filePath)
 	if err != nil {
 		return tableSchema{}, err
 	}
@@ -67,7 +73,7 @@ func readCSVSampleRows(reader *csv.Reader, limit int) ([][]string, error) {
 }
 
 func insertCSVRowsInBatches(databasePath, filePath, tableName string, columns []schemaColumn, batchSize int) error {
-	file, err := os.Open(filePath)
+	file, err := openCSVFile(filePath)
 	if err != nil {
 		return err
 	}
@@ -100,6 +106,44 @@ func insertCSVRowsInBatches(databasePath, filePath, tableName string, columns []
 		return nil
 	}
 	return execSQLite(databasePath, buildInsertRowsSQL(tableName, columns, batch))
+}
+
+func openCSVFile(filePath string) (io.ReadCloser, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	reader := bufio.NewReader(file)
+	peek, err := reader.Peek(4096)
+	if err != nil && err != io.EOF {
+		_ = file.Close()
+		return nil, err
+	}
+
+	if hasUTF8BOM(peek) {
+		if _, err := reader.Discard(3); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
+		return &wrappedReadCloser{Reader: reader, Closer: file}, nil
+	}
+
+	if utf8.Valid(peek) {
+		return &wrappedReadCloser{Reader: reader, Closer: file}, nil
+	}
+
+	decoder := transform.NewReader(reader, simplifiedchinese.GB18030.NewDecoder())
+	return &wrappedReadCloser{Reader: decoder, Closer: file}, nil
+}
+
+type wrappedReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+func hasUTF8BOM(peek []byte) bool {
+	return len(peek) >= 3 && bytes.Equal(peek[:3], []byte{0xEF, 0xBB, 0xBF})
 }
 
 func buildCSVColumns(headers []string, rows [][]string) []schemaColumn {
