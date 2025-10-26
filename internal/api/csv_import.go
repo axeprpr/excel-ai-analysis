@@ -18,6 +18,7 @@ import (
 )
 
 const csvInsertBatchSize = 500
+const csvInsertMaxStatementBytes = 64 << 10
 
 func importCSVIntoSQLite(databasePath, filePath, tableName string) (tableSchema, error) {
 	file, err := openCSVFile(filePath)
@@ -85,6 +86,7 @@ func insertCSVRowsInBatches(databasePath, filePath, tableName string, columns []
 	}
 
 	batch := make([][]string, 0, batchSize)
+	batchBytes := 0
 	for {
 		record, err := reader.Read()
 		if err != nil {
@@ -93,19 +95,31 @@ func insertCSVRowsInBatches(databasePath, filePath, tableName string, columns []
 			}
 			return err
 		}
-		batch = append(batch, record)
-		if len(batch) >= batchSize {
+
+		recordBytes := estimatedCSVRecordStatementBytes(record)
+		if len(batch) > 0 && (len(batch) >= batchSize || batchBytes+recordBytes > csvInsertMaxStatementBytes) {
 			if err := execSQLite(databasePath, buildInsertRowsSQL(tableName, columns, batch)); err != nil {
 				return err
 			}
 			batch = batch[:0]
+			batchBytes = 0
 		}
+		batch = append(batch, record)
+		batchBytes += recordBytes
 	}
 
 	if len(batch) == 0 {
 		return nil
 	}
 	return execSQLite(databasePath, buildInsertRowsSQL(tableName, columns, batch))
+}
+
+func estimatedCSVRecordStatementBytes(record []string) int {
+	size := 64
+	for _, value := range record {
+		size += len(value) + 8
+	}
+	return size
 }
 
 func openCSVFile(filePath string) (io.ReadCloser, error) {

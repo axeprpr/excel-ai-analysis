@@ -457,7 +457,7 @@ func TestUploadCreatesImportTaskAndSchema(t *testing.T) {
 		t.Fatalf("expected upload file extension to be .xlsx, got %v", firstFile["extension"])
 	}
 
-	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 400, 25*time.Millisecond)
 
 	schemaReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/schema", nil)
 	schemaRec := httptest.NewRecorder()
@@ -579,7 +579,7 @@ func TestQueryReturnsSchemaAwarePlaceholderResponse(t *testing.T) {
 		t.Fatalf("expected task_id in upload response")
 	}
 
-	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 400, 25*time.Millisecond)
 
 	queryBody := bytes.NewBufferString(`{"question":"What is the top sales category?"}`)
 	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
@@ -722,7 +722,7 @@ func TestDatabaseInspectionReturnsSQLiteTables(t *testing.T) {
 		t.Fatalf("expected task_id in upload response")
 	}
 
-	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 400, 25*time.Millisecond)
 
 	dbReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/database", nil)
 	dbRec := httptest.NewRecorder()
@@ -1296,7 +1296,7 @@ func TestCSVUploadImportsLargeFilesAcrossBatches(t *testing.T) {
 		t.Fatalf("expected task_id in upload response")
 	}
 
-	waitForImportTaskStatus(t, handler, sessionID, taskID, "completed")
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 400, 25*time.Millisecond)
 
 	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
 	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "large_50000";`)
@@ -1313,6 +1313,83 @@ func TestCSVUploadImportsLargeFilesAcrossBatches(t *testing.T) {
 	}
 	if !strings.Contains(string(topCategoryOutput), "|7143") {
 		t.Fatalf("expected top category count around 7143, got %q", string(bytes.TrimSpace(topCategoryOutput)))
+	}
+}
+
+func TestCSVUploadBatchesLongRowsWithoutHittingSQLiteArgumentLimit(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	longURL := "https://example.com/path?" + strings.Repeat("token=abcdefghijklmnopqrstuvwxyz0123456789&", 20)
+	var csvBuilder strings.Builder
+	csvBuilder.WriteString("时间,用户,URL分类,URL,网页标题\n")
+	for i := 0; i < 2500; i++ {
+		fmt.Fprintf(
+			&csvBuilder,
+			"2026-03-27 09:%02d:00,user_%d,在线聊天,%s%d,页面标题_%d\n",
+			i%60,
+			i,
+			longURL,
+			i,
+			i,
+		)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "long_rows.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(csvBuilder.String())); err != nil {
+		t.Fatalf("failed to write csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusAccepted, uploadRec.Code, uploadRec.Body.String())
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task_id in upload response")
+	}
+
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 300, 20*time.Millisecond)
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	rowCountOutput, err := sqliteQueryWithRetry(sessionDB, `SELECT COUNT(*) FROM "long_rows";`)
+	if err != nil {
+		t.Fatalf("failed to count imported csv rows: %v", err)
+	}
+	if string(bytes.TrimSpace(rowCountOutput)) != "2500" {
+		t.Fatalf("expected 2500 imported csv rows, got %q", string(bytes.TrimSpace(rowCountOutput)))
 	}
 }
 

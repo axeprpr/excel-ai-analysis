@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -338,7 +339,10 @@ func syncSessionMetaToDatabase(meta sessionMetadata) error {
 	}
 
 	cmd := exec.Command("sqlite3", meta.DatabasePath, strings.Join(statements, "\n"))
-	return cmd.Run()
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("sqlite3 session metadata sync failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func sqliteUpsert(key, value string) string {
@@ -352,7 +356,15 @@ func sqliteQuote(value string) string {
 }
 
 func execSQLite(databasePath, statement string) error {
-	return exec.Command("sqlite3", databasePath, statement).Run()
+	cmd := exec.Command("sqlite3", databasePath, statement)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = "no sqlite3 stderr output"
+		}
+		return fmt.Errorf("sqlite3 command failed: %w: %s", err, message)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

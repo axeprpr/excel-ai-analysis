@@ -59,7 +59,7 @@ func (h *Handler) processImportTask(sessionID, taskID string) {
 			var schema tableSchema
 			schema, err = importCSVIntoSQLite(meta.DatabasePath, filePath, tableName)
 			if err != nil {
-				markTaskFailed(sessionDir, task, "failed to import csv into sqlite")
+				markTaskFailed(sessionDir, task, "failed to import csv into sqlite: "+err.Error())
 				return
 			}
 			fileSchemas = []tableSchema{schema}
