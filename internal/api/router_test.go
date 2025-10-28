@@ -1393,6 +1393,93 @@ func TestCSVUploadBatchesLongRowsWithoutHittingSQLiteArgumentLimit(t *testing.T)
 	}
 }
 
+func TestDetailQueriesReportTotalCountWhileCappingReturnedRows(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected session_id in create response")
+	}
+
+	var csvBuilder strings.Builder
+	csvBuilder.WriteString("visit_time,user_id,url_category,page_title,url\n")
+	for i := 0; i < 500; i++ {
+		fmt.Fprintf(&csvBuilder, "2026-03-27 09:%02d:00,user_%d,在线聊天,title_%d,https://example.com/%d\n", i%60, i, i, i)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "detail_rows.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(csvBuilder.String())); err != nil {
+		t.Fatalf("failed to write csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusAccepted, uploadRec.Code, uploadRec.Body.String())
+	}
+
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 300, 20*time.Millisecond)
+
+	sessionDB := filepath.Join(dataDir, "sessions", sessionID, "session.db")
+	plan := queryPlan{
+		SourceTable:     "detail_rows",
+		SourceFile:      "detail_rows.csv",
+		Mode:            "detail",
+		SelectedColumns: []string{"visit_time", "page_title"},
+		SQL:             `SELECT visit_time, page_title FROM detail_rows ORDER BY visit_time ASC`,
+	}
+	result := executePlanQuery(sessionDB, plan)
+	if !result.OK {
+		t.Fatalf("expected detail plan to execute successfully, got %v", result.Error)
+	}
+	if len(result.Rows) != 200 {
+		t.Fatalf("expected 200 returned rows for capped detail query, got %d", len(result.Rows))
+	}
+	if result.TotalCount != 500 {
+		t.Fatalf("expected total row count 500, got %d", result.TotalCount)
+	}
+	if !result.Truncated {
+		t.Fatalf("expected detail result to be marked truncated")
+	}
+	warnings := queryWarnings(plan, result)
+	found := false
+	for _, warning := range warnings {
+		if strings.Contains(warning, "capped to 200 rows") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected truncation warning, got %v", warnings)
+	}
+}
+
 func TestCSVUploadImportsGBKEncodedChineseCSV(t *testing.T) {
 	dataDir := t.TempDir()
 	handler := NewHandler(dataDir)

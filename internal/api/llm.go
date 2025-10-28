@@ -14,6 +14,7 @@ type llmSQLRequest struct {
 	Schema         schemaSnapshot `json:"schema"`
 	FailedSQL      string         `json:"failed_sql,omitempty"`
 	ExecutionError string         `json:"execution_error,omitempty"`
+	PlanningHints  []string       `json:"planning_hints,omitempty"`
 }
 
 type llmSQLResponse struct {
@@ -81,8 +82,10 @@ func (h *Handler) generateSQLWithOpenAICompatible(settings modelSettings, req ll
 				Role: "system",
 				Content: "You generate read-only SQLite SQL for the user's question. " +
 					"Return strict JSON with keys sql and mode. " +
-					"Allowed modes are detail, aggregate, topn, trend, count. " +
-					"Only generate SELECT statements.",
+					"Allowed modes are detail, aggregate, topn, trend, count, share, compare. " +
+					"Only generate a single read-only SELECT or WITH statement for SQLite. " +
+					"Prefer aggregation over raw detail when the user asks for analysis, distribution, summary, counts, or charts. " +
+					"If a detail query could return many rows, add a LIMIT no greater than 200.",
 			},
 			{
 				Role:    "user",
@@ -145,6 +148,9 @@ func buildLLMSQLPrompt(req llmSQLRequest) string {
 		prompt += "\n\nPrevious SQL Attempt:\n" + req.FailedSQL
 		prompt += "\n\nExecution Error:\n" + req.ExecutionError
 		prompt += "\n\nRepair the SQL for SQLite and keep it read-only."
+	}
+	if len(req.PlanningHints) > 0 {
+		prompt += "\n\nPlanning Hints:\n- " + strings.Join(req.PlanningHints, "\n- ")
 	}
 	return prompt
 }

@@ -44,11 +44,15 @@ type queryPlan struct {
 }
 
 type queryExecutionResult struct {
-	Rows  []map[string]any
-	Cols  []string
-	OK    bool
-	Error string
+	Rows       []map[string]any
+	Cols       []string
+	OK         bool
+	Error      string
+	Truncated  bool
+	TotalCount int
 }
+
+const maxDetailRows = 200
 
 func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -126,18 +130,18 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 	}
 
 	plan, plannerWarnings := h.buildQueryPlanWithFallback(settings, snapshot, req.Question)
-	execResult := executeQueryIfPossible(meta.DatabasePath, plan.SQL, plan.SelectedColumns)
+	execResult := executePlanQuery(meta.DatabasePath, plan)
 	if shouldRetryLLMRepair(plannerWarnings, execResult) {
 		repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, req.Question, plan, execResult)
 		plannerWarnings = append(plannerWarnings, llmRepairWarnings...)
 		if repaired {
 			plan = repairedPlan
-			execResult = executeQueryIfPossible(meta.DatabasePath, plan.SQL, plan.SelectedColumns)
+			execResult = executePlanQuery(meta.DatabasePath, plan)
 		}
 	}
 	if shouldRetryWithHeuristicPlan(plannerWarnings, execResult) {
 		repairedPlan, heuristicWarnings := h.buildHeuristicQueryPlan(settings, snapshot, req.Question)
-		repairedResult := executeQueryIfPossible(meta.DatabasePath, repairedPlan.SQL, repairedPlan.SelectedColumns)
+		repairedResult := executePlanQuery(meta.DatabasePath, repairedPlan)
 		if repairedResult.OK {
 			plan = repairedPlan
 			execResult = repairedResult
@@ -168,10 +172,10 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 		"sql":           plan.SQL,
 		"rows":          rows,
 		"columns":       columns,
-		"row_count":     len(rows),
+		"row_count":     effectiveRowCount(execResult, len(rows)),
 		"executed":      executed,
 		"chart_mode":    chartMode,
-		"summary":       buildQuerySummary(plan, executed, len(rows)),
+		"summary":       buildQuerySummary(plan, executed, effectiveRowCount(execResult, len(rows))),
 		"query_plan":    plan,
 		"visualization": visualization,
 		"chart":         buildChartOutput(chartMode, settings, plan, visualization, columns, rows),
@@ -188,16 +192,31 @@ func (h *Handler) repairQueryPlanWithLLM(settings modelSettings, snapshot schema
 		Schema:         snapshot,
 		FailedSQL:      failedPlan.SQL,
 		ExecutionError: execResult.Error,
+		PlanningHints:  llmPlanningHints(failedPlan),
 	})
 	if err != nil {
-		return failedPlan, []string{"LLM SQL repair failed; falling back to heuristic repair if available."}, false
+		llmResp, err = h.generateSQLWithLLM(settings, llmSQLRequest{
+			Question:       question,
+			Schema:         snapshot,
+			FailedSQL:      failedPlan.SQL,
+			ExecutionError: execResult.Error,
+			PlanningHints: append(
+				llmPlanningHints(failedPlan),
+				"Keep the query read-only and SQLite-compatible.",
+				"Prefer a bounded detail query with LIMIT 200 if the result set may be large.",
+			),
+		})
+		if err != nil {
+			return failedPlan, []string{"LLM SQL repair failed after multiple attempts; falling back to heuristic repair if available."}, false
+		}
 	}
-	if !isSafeReadOnlySQL(llmResp.SQL) {
+	safeSQL, validationErr := sanitizeReadOnlySQL(llmResp.SQL)
+	if validationErr != nil {
 		return failedPlan, []string{"LLM SQL repair returned an unsafe or unsupported SQL statement."}, false
 	}
 
 	repairedPlan := failedPlan
-	repairedPlan.SQL = strings.TrimSpace(llmResp.SQL)
+	repairedPlan.SQL = safeSQL
 	if mode := normalizeIntentMode(llmResp.Mode); mode != "" {
 		repairedPlan.Mode = mode
 		table := findTableByName(snapshot, repairedPlan.SourceTable)
@@ -222,13 +241,26 @@ func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, snapshot sc
 	}
 
 	llmResp, err := h.generateSQLWithLLM(settings, llmSQLRequest{
-		Question: question,
-		Schema:   snapshot,
+		Question:      question,
+		Schema:        snapshot,
+		PlanningHints: llmPlanningHints(heuristicPlan),
 	})
 	if err != nil {
-		return heuristicPlan, append(heuristicWarnings, "LLM SQL generation failed; using heuristic query planner.")
+		llmResp, err = h.generateSQLWithLLM(settings, llmSQLRequest{
+			Question: question,
+			Schema:   snapshot,
+			PlanningHints: append(
+				llmPlanningHints(heuristicPlan),
+				"Prefer an aggregated summary when the question asks for analysis or charts.",
+				"Keep detail mode limited to 200 rows.",
+			),
+		})
+		if err != nil {
+			return heuristicPlan, append(heuristicWarnings, "LLM SQL generation failed after multiple attempts; using heuristic query planner.")
+		}
 	}
-	if !isSafeReadOnlySQL(llmResp.SQL) {
+	safeSQL, validationErr := sanitizeReadOnlySQL(llmResp.SQL)
+	if validationErr != nil {
 		return heuristicPlan, append(heuristicWarnings, "LLM returned an unsafe or unsupported SQL statement; using heuristic query planner.")
 	}
 
@@ -250,7 +282,7 @@ func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, snapshot sc
 		Question:           question,
 		ChartType:          heuristicPlan.ChartType,
 		Mode:               mode,
-		SQL:                strings.TrimSpace(llmResp.SQL),
+		SQL:                safeSQL,
 	}, append(heuristicWarnings, "SQL was generated by the configured LLM provider.")
 }
 
@@ -461,6 +493,31 @@ func executeQueryIfPossible(databasePath, sql string, orderedColumns []string) q
 	return queryExecutionResult{Rows: rows, Cols: columns, OK: true}
 }
 
+func executePlanQuery(databasePath string, plan queryPlan) queryExecutionResult {
+	sql := plan.SQL
+	if plan.Mode == "detail" {
+		sql = enforceDetailLimit(sql, maxDetailRows)
+	}
+	result := executeQueryIfPossible(databasePath, sql, plan.SelectedColumns)
+	if !result.OK {
+		return result
+	}
+	result.TotalCount = len(result.Rows)
+	if plan.Mode != "detail" || len(result.Rows) < maxDetailRows {
+		return result
+	}
+
+	countResult := executeQueryIfPossible(databasePath, buildCountOverQuerySQL(plan.SQL), []string{"total_count"})
+	if !countResult.OK || len(countResult.Rows) == 0 {
+		return result
+	}
+	if total, ok := readIntValue(countResult.Rows[0]["total_count"]); ok {
+		result.TotalCount = total
+		result.Truncated = total > len(result.Rows)
+	}
+	return result
+}
+
 func queryWarning(executed bool) string {
 	if executed {
 		return "Query executed against the local SQLite session database."
@@ -481,7 +538,46 @@ func queryWarnings(plan queryPlan, result queryExecutionResult) []string {
 	if strings.EqualFold(filepath.Ext(plan.SourceFile), ".xls") {
 		warnings = append(warnings, "This query is based on placeholder schema for a legacy .xls upload.")
 	}
+	if result.Truncated && plan.Mode == "detail" {
+		warnings = append(warnings, "Detail results were capped to 200 rows; row_count reports the full matching row count.")
+	}
 	return warnings
+}
+
+func effectiveRowCount(result queryExecutionResult, fallback int) int {
+	if result.TotalCount > 0 {
+		return result.TotalCount
+	}
+	return fallback
+}
+
+func enforceDetailLimit(sql string, limit int) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(sql, ";"))
+	if strings.Contains(strings.ToLower(trimmed), " limit ") {
+		return trimmed + ";"
+	}
+	return trimmed + " LIMIT " + strconv.Itoa(limit) + ";"
+}
+
+func buildCountOverQuerySQL(sql string) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(sql, ";"))
+	return "SELECT COUNT(*) AS total_count FROM (" + trimmed + ") AS base_query;"
+}
+
+func readIntValue(value any) (int, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case string:
+		n, err := strconv.Atoi(v)
+		return n, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func shouldRetryLLMRepair(plannerWarnings []string, result queryExecutionResult) bool {
@@ -521,6 +617,29 @@ func llmWasUsed(plannerWarnings []string) bool {
 		}
 	}
 	return false
+}
+
+func llmPlanningHints(plan queryPlan) []string {
+	hints := make([]string, 0, 8)
+	if plan.SourceTable != "" {
+		hints = append(hints, "Preferred source table: "+plan.SourceTable)
+	}
+	if plan.DimensionColumn != "" {
+		hints = append(hints, "Preferred dimension column: "+plan.DimensionColumn)
+	}
+	if plan.MetricColumn != "" {
+		hints = append(hints, "Preferred metric column: "+plan.MetricColumn)
+	}
+	if plan.TimeColumn != "" {
+		hints = append(hints, "Preferred time column: "+plan.TimeColumn)
+	}
+	if plan.Mode != "" {
+		hints = append(hints, "Preferred mode: "+plan.Mode)
+	}
+	if len(plan.SelectedColumns) > 0 {
+		hints = append(hints, "Preferred selected columns: "+strings.Join(plan.SelectedColumns, ", "))
+	}
+	return hints
 }
 
 func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
@@ -634,19 +753,32 @@ func columnNames(columns []schemaColumn) []string {
 }
 
 func isSafeReadOnlySQL(sql string) bool {
-	trimmed := strings.ToLower(strings.TrimSpace(sql))
+	_, err := sanitizeReadOnlySQL(sql)
+	return err == nil
+}
+
+func sanitizeReadOnlySQL(sql string) (string, error) {
+	trimmed := strings.TrimSpace(sql)
 	if trimmed == "" {
-		return false
+		return "", errors.New("empty sql")
 	}
-	if !strings.HasPrefix(trimmed, "select ") && !strings.HasPrefix(trimmed, "with ") {
-		return false
+	trimmed = strings.TrimSuffix(trimmed, ";")
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, ";") {
+		return "", errors.New("multiple statements are not allowed")
 	}
-	for _, banned := range []string{" insert ", " update ", " delete ", " drop ", " alter ", " create ", " attach ", " detach ", " pragma "} {
-		if strings.Contains(trimmed, banned) {
-			return false
+	if strings.Contains(lower, "--") || strings.Contains(lower, "/*") {
+		return "", errors.New("sql comments are not allowed")
+	}
+	if !strings.HasPrefix(lower, "select ") && !strings.HasPrefix(lower, "with ") {
+		return "", errors.New("sql must start with select or with")
+	}
+	for _, banned := range []string{" insert ", " update ", " delete ", " drop ", " alter ", " create ", " attach ", " detach ", " pragma ", " vacuum ", " reindex "} {
+		if strings.Contains(" "+lower+" ", banned) {
+			return "", errors.New("sql contains unsupported write keywords")
 		}
 	}
-	return true
+	return trimmed + ";", nil
 }
 
 func firstMetricColumn(table tableSchema) string {

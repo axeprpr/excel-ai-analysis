@@ -95,6 +95,9 @@ func TestBuildQueryPlanWithFallbackRejectsUnsafeLLMSQL(t *testing.T) {
 	if !isSafeReadOnlySQL("SELECT category, amount FROM sales LIMIT 10;") {
 		t.Fatalf("expected SELECT to be safe")
 	}
+	if isSafeReadOnlySQL("SELECT * FROM sales; DELETE FROM sales;") {
+		t.Fatalf("expected multiple statements to be unsafe")
+	}
 
 	plan, warnings := handler.buildQueryPlanWithFallback(settings, snapshot, "show sales by category")
 	if plan.SQL == "" {
@@ -102,6 +105,21 @@ func TestBuildQueryPlanWithFallbackRejectsUnsafeLLMSQL(t *testing.T) {
 	}
 	if len(warnings) == 0 {
 		t.Fatalf("expected fallback warning when llm request fails")
+	}
+}
+
+func TestBuildLLMSQLPromptIncludesPlanningHints(t *testing.T) {
+	prompt := buildLLMSQLPrompt(llmSQLRequest{
+		Question:      "帮我做个上网行为分析",
+		Schema:        schemaSnapshot{Tables: []tableSchema{{TableName: "webaccess"}}},
+		PlanningHints: []string{"Preferred source table: webaccess", "Prefer an aggregated summary."},
+	})
+
+	if !strings.Contains(prompt, "Planning Hints") {
+		t.Fatalf("expected prompt to include planning hints")
+	}
+	if !strings.Contains(prompt, "Preferred source table: webaccess") {
+		t.Fatalf("expected prompt to include source table hint")
 	}
 }
 
