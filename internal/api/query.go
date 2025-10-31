@@ -129,10 +129,23 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 		return nil, errors.New("failed to update session metadata")
 	}
 
-	plan, plannerWarnings := h.buildQueryPlanWithFallback(settings, snapshot, req.Question)
+	response, err := h.executeSingleQuery(meta, settings, snapshot, req.Question, chartMode)
+	if err != nil {
+		return nil, err
+	}
+	if shouldBuildAnalysisReport(req.Question) {
+		if report := h.buildAnalysisReport(meta, settings, snapshot, chartMode); len(report) > 0 {
+			response["analysis_report"] = report
+		}
+	}
+	return response, nil
+}
+
+func (h *Handler) executeSingleQuery(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, question, chartMode string) (map[string]any, error) {
+	plan, plannerWarnings := h.buildQueryPlanWithFallback(settings, snapshot, question)
 	execResult := executePlanQuery(meta.DatabasePath, plan)
 	if shouldRetryLLMRepair(plannerWarnings, execResult) {
-		repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, req.Question, plan, execResult)
+		repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, question, plan, execResult)
 		plannerWarnings = append(plannerWarnings, llmRepairWarnings...)
 		if repaired {
 			plan = repairedPlan
@@ -140,7 +153,7 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 		}
 	}
 	if shouldRetryWithHeuristicPlan(plannerWarnings, execResult) {
-		repairedPlan, heuristicWarnings := h.buildHeuristicQueryPlan(settings, snapshot, req.Question)
+		repairedPlan, heuristicWarnings := h.buildHeuristicQueryPlan(settings, snapshot, question)
 		repairedResult := executePlanQuery(meta.DatabasePath, repairedPlan)
 		if repairedResult.OK {
 			plan = repairedPlan
@@ -151,13 +164,13 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 	}
 	rows, columns, executed := execResult.Rows, execResult.Cols, execResult.OK
 	if !executed || len(columns) == 0 || len(rows) == 0 {
-		rows = buildPlaceholderRows(snapshot, req.Question)
+		rows = buildPlaceholderRows(snapshot, question)
 		columns = buildQueryColumns(snapshot)
 		executed = false
 	}
 	visualization := map[string]any{
 		"type":             plan.ChartType,
-		"title":            req.Question,
+		"title":            question,
 		"x":                pickVisualizationX(plan, snapshot),
 		"y":                pickVisualizationY(plan, snapshot),
 		"series":           pickVisualizationSeries(plan, snapshot),
@@ -168,7 +181,7 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 
 	return map[string]any{
 		"session_id":    meta.SessionID,
-		"question":      req.Question,
+		"question":      question,
 		"sql":           plan.SQL,
 		"rows":          rows,
 		"columns":       columns,
@@ -640,6 +653,79 @@ func llmPlanningHints(plan queryPlan) []string {
 		hints = append(hints, "Preferred selected columns: "+strings.Join(plan.SelectedColumns, ", "))
 	}
 	return hints
+}
+
+func shouldBuildAnalysisReport(question string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(question))
+	if normalized == "" {
+		return false
+	}
+	return containsAny(normalized, []string{
+		"分析", "analysis", "overview", "dashboard", "report", "行为分析", "上网行为分析", "画像",
+	})
+}
+
+func (h *Handler) buildAnalysisReport(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, chartMode string) []map[string]any {
+	questions := buildAnalysisQuestions(snapshot)
+	report := make([]map[string]any, 0, len(questions))
+	seen := map[string]struct{}{}
+	for _, item := range questions {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		response, err := h.executeSingleQuery(meta, settings, snapshot, item, chartMode)
+		if err != nil {
+			continue
+		}
+		report = append(report, map[string]any{
+			"title":    item,
+			"question": item,
+			"response": response,
+		})
+		if len(report) >= 3 {
+			break
+		}
+	}
+	return report
+}
+
+func buildAnalysisQuestions(snapshot schemaSnapshot) []string {
+	if len(snapshot.Tables) == 0 {
+		return nil
+	}
+	table := snapshot.Tables[0]
+	primaryCategory := firstMatchingDimensionColumn(table, []string{"分类", "category", "type", "group", "级别"})
+	secondaryDimension := firstMatchingDimensionColumn(table, []string{"终端", "device", "用户组", "region", "用户", "user"})
+	timeColumn := firstTimeColumn(table)
+
+	questions := make([]string, 0, 4)
+	if primaryCategory != "" {
+		questions = append(questions, "按"+primaryCategory+"统计访问量分布饼图")
+	}
+	if secondaryDimension != "" && secondaryDimension != primaryCategory {
+		questions = append(questions, "按"+secondaryDimension+"统计访问量柱状图")
+	}
+	if timeColumn != "" {
+		questions = append(questions, "按时间统计访问趋势")
+	}
+	if primaryCategory == "" && secondaryDimension == "" {
+		questions = append(questions, "按维度统计访问量分布饼图")
+	}
+	return questions
+}
+
+func firstMatchingDimensionColumn(table tableSchema, keywords []string) string {
+	for _, column := range table.Columns {
+		if isMetricColumn(column) || isTimeColumn(column) {
+			continue
+		}
+		name := strings.ToLower(column.Name)
+		if containsAny(name, keywords) {
+			return column.Name
+		}
+	}
+	return ""
 }
 
 func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {

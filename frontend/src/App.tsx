@@ -22,7 +22,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 
 type SidebarView = "chat" | "settings"
@@ -85,6 +84,11 @@ type QueryResponse = {
   warnings?: string[]
   row_count: number
   executed: boolean
+  analysis_report?: {
+    title: string
+    question: string
+    response: QueryResponse
+  }[]
 }
 
 type ChatUploadResponse = {
@@ -782,6 +786,26 @@ function SystemMessage({ content }: { content: string }) {
 }
 
 function AssistantMessage({ response }: { response: QueryResponse }) {
+  return (
+    <div className="grid gap-3 rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm">
+      <AssistantMessageBody response={response} />
+
+      {response.analysis_report?.length ? (
+        <div className="grid gap-3 rounded-[24px] border border-stone-200 bg-stone-50 p-4">
+          <div className="text-sm font-medium text-stone-900">自动分析视图</div>
+          {response.analysis_report.map((section, index) => (
+            <div key={`${section.title}-${index}`} className="grid gap-3 rounded-2xl border border-stone-200 bg-white p-3">
+              <div className="text-sm font-medium text-stone-900">{section.title}</div>
+              <AssistantMessageBody response={section.response} compact />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function AssistantMessageBody({ response, compact = false }: { response: QueryResponse; compact?: boolean }) {
   const rows = response.rows || []
   const columns = response.columns || []
   const chart = (response.chart || {}) as Record<string, unknown>
@@ -795,11 +819,19 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
   const mcpError = String(chart.error || "")
 
   return (
-    <div className="grid gap-3 rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm">
-      <div className="text-sm font-medium text-stone-900">{response.summary}</div>
-      <div className="text-xs text-stone-500">
-        mode: {response.chart_mode} · executed: {String(response.executed)} · rows: {response.row_count}
-      </div>
+    <>
+      {!compact ? (
+        <>
+          <div className="text-sm font-medium text-stone-900">{response.summary}</div>
+          <div className="text-xs text-stone-500">
+            mode: {response.chart_mode} · executed: {String(response.executed)} · rows: {response.row_count}
+          </div>
+        </>
+      ) : (
+        <div className="text-xs text-stone-500">
+          {response.summary} · mode: {response.chart_mode} · rows: {response.row_count}
+        </div>
+      )}
       {queryPlan ? (
         <div className="grid gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-3">
           <div className="flex flex-wrap gap-2 text-xs">
@@ -816,9 +848,6 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
               {queryPlan.source_sheet ? ` · ${queryPlan.source_sheet}` : ""}
             </div>
             <div>reason: {queryPlan.selection_reason || "-"}</div>
-            {queryPlan.candidate_tables?.length ? (
-              <div>candidates: {queryPlan.candidate_tables.join(", ")}</div>
-            ) : null}
           </div>
         </div>
       ) : null}
@@ -834,87 +863,25 @@ function AssistantMessage({ response }: { response: QueryResponse }) {
                 executed: {String(mcpExecuted)}
               </Badge>
               {mcpTool ? <Badge className="bg-orange-100 text-orange-700">{mcpTool}</Badge> : null}
-              {typeof chart.endpoint === "string" && chart.endpoint ? (
-                <Badge className="bg-sky-100 text-sky-700">{String(chart.endpoint)}</Badge>
-              ) : null}
             </div>
-
             {mcpURL ? (
-              <div className="grid gap-2">
-                <a
-                  className="text-xs font-medium text-orange-700 underline underline-offset-2"
-                  href={mcpURL}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open rendered chart
-                </a>
-                <img
-                  src={mcpURL}
-                  alt="Rendered MCP chart"
-                  className="max-h-[420px] rounded-2xl border border-stone-200 bg-white object-contain"
-                />
-              </div>
+              <img
+                src={mcpURL}
+                alt="Rendered MCP chart"
+                className="max-h-[320px] rounded-2xl border border-stone-200 bg-white object-contain"
+              />
             ) : null}
-
             {mcpError ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-                {mcpError}
-              </div>
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{mcpError}</div>
             ) : null}
-
-            <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
-              {JSON.stringify(chart, null, 2)}
-            </pre>
           </div>
         ) : (
           <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
-            {JSON.stringify(
-              {
-                columns,
-                rows,
-                visualization,
-              },
-              null,
-              2,
-            )}
+            {JSON.stringify({ columns, rows, visualization }, null, 2)}
           </pre>
         )}
       </div>
-
-      {columns.length > 0 ? (
-        <div className="overflow-hidden rounded-2xl border border-stone-200">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {columns.map((column) => (
-                  <TableHead key={column}>{column}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row, index) => (
-                <TableRow key={index}>
-                  {columns.map((column) => (
-                    <TableCell key={column}>{String(row[column] ?? "")}</TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : null}
-
-      {response.warnings?.length ? (
-        <div className="flex flex-wrap gap-2">
-          {response.warnings.map((warning, index) => (
-            <Badge key={index} className="bg-stone-200 text-stone-700">
-              {warning}
-            </Badge>
-          ))}
-        </div>
-      ) : null}
-    </div>
+    </>
   )
 }
 

@@ -1480,6 +1480,94 @@ func TestDetailQueriesReportTotalCountWhileCappingReturnedRows(t *testing.T) {
 	}
 }
 
+func TestBroadAnalysisQuestionReturnsMultipleAnalysisViews(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+
+	csvData := strings.Join([]string{
+		"时间,终端类型,URL分类,网页标题",
+		"2026-03-27 09:00:00,Android,网上交易,支付宝",
+		"2026-03-27 09:01:00,IOS,在线聊天,微信网页版",
+		"2026-03-27 09:02:00,Android,网上交易,支付宝",
+		"2026-03-27 10:00:00,Windows,门户网站与搜索引擎,百度一下",
+		"2026-03-27 10:05:00,IOS,在线聊天,微信网页版",
+	}, "\n") + "\n"
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "webaccess.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(csvData)); err != nil {
+		t.Fatalf("failed to write csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 200, 20*time.Millisecond)
+
+	queryBody := bytes.NewBufferString(`{"question":"帮我做个上网行为分析","chart_mode":"data"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode query response: %v", err)
+	}
+	report, ok := queryResp["analysis_report"].([]any)
+	if !ok || len(report) < 2 {
+		t.Fatalf("expected multiple analysis views, got %v", queryResp["analysis_report"])
+	}
+
+	first, ok := report[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first analysis view to be an object")
+	}
+	firstResponse, ok := first["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected analysis view response payload")
+	}
+	firstPlan, ok := firstResponse["query_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_plan in first analysis view")
+	}
+	if firstPlan["chart_type"] != "pie" {
+		t.Fatalf("expected first analysis view to be pie, got %v", firstPlan["chart_type"])
+	}
+}
+
 func TestCSVUploadImportsGBKEncodedChineseCSV(t *testing.T) {
 	dataDir := t.TempDir()
 	handler := NewHandler(dataDir)
