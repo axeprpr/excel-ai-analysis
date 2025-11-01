@@ -24,9 +24,9 @@ func TestDetectQueryIntent(t *testing.T) {
 		{"count rows this month", "count", "table", true, ""},
 		{"show category share", "share", "pie", false, ""},
 		{"compare category revenue", "compare", "bar", false, ""},
-		{"可以生成一个柱状图吗", "detail", "bar", false, ""},
-		{"请画一个折线图", "detail", "line", false, ""},
-		{"给我一个饼图", "detail", "pie", false, ""},
+		{"可以生成一个柱状图吗", "topn", "bar", false, ""},
+		{"请画一个折线图", "trend", "line", false, ""},
+		{"给我一个饼图", "share", "pie", false, ""},
 		{"同比销售额", "compare", "line", false, "yoy"},
 		{"mom revenue", "compare", "line", false, "mom"},
 		{"detail rows for east", "detail", "table", true, ""},
@@ -46,5 +46,26 @@ func TestDetectQueryIntent(t *testing.T) {
 		if intent.ComparisonType != tc.wantCompareType {
 			t.Fatalf("question %q: expected comparison type %q, got %q", tc.question, tc.wantCompareType, intent.ComparisonType)
 		}
+	}
+}
+
+func TestDetectQueryIntentSupportsTrendWithoutMetric(t *testing.T) {
+	table := tableSchema{
+		TableName: "webaccess",
+		Columns: []schemaColumn{
+			{Name: "时间", Type: "TEXT", Semantic: "time"},
+			{Name: "终端类型", Type: "TEXT", Semantic: "dimension"},
+		},
+	}
+
+	intent := detectQueryIntent("按时间统计访问趋势", table)
+	if intent.Mode != "trend" {
+		t.Fatalf("expected trend mode, got %q", intent.Mode)
+	}
+	if intent.ChartType != "line" {
+		t.Fatalf("expected line chart, got %q", intent.ChartType)
+	}
+	if !intent.HasTimeReference {
+		t.Fatalf("expected time reference to be set")
 	}
 }

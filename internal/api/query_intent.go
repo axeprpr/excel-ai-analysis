@@ -73,10 +73,25 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 		intent.Mode = "aggregate"
 	}
 	if hasAny(q, "trend", "over time", "by month", "monthly", "by day", "daily", "按月", "按天", "趋势") &&
-		firstTimeColumn(table) != "" && firstMetricColumn(table) != "" {
+		firstTimeColumn(table) != "" {
 		intent.Mode = "trend"
 		intent.ChartType = "line"
 		intent.HasTimeReference = true
+	}
+
+	if intent.Mode == "detail" {
+		switch intent.ChartType {
+		case "pie":
+			intent.Mode = "share"
+			intent.Share = true
+		case "bar":
+			intent.Mode = "topn"
+		case "line":
+			if firstTimeColumn(table) != "" {
+				intent.Mode = "trend"
+				intent.HasTimeReference = true
+			}
+		}
 	}
 
 	switch {
