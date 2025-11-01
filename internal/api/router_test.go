@@ -2013,9 +2013,12 @@ func TestXLSXUploadSkipsLeadingEmptyRowsAndBlankDataRows(t *testing.T) {
 	if queryPlan["chart_type"] != "bar" {
 		t.Fatalf("expected chart_type bar after explicit request, got %v", queryPlan["chart_type"])
 	}
+	if queryPlan["mode"] != "topn" {
+		t.Fatalf("expected topn mode after explicit bar request, got %v", queryPlan["mode"])
+	}
 	columns, ok := queryResp["columns"].([]any)
-	if !ok || len(columns) != 2 || columns[0] != "category" || columns[1] != "amount" {
-		t.Fatalf("expected ordered columns [category amount], got %v", queryResp["columns"])
+	if !ok || len(columns) != 2 || columns[0] != "category" || columns[1] != "total_value" {
+		t.Fatalf("expected ordered columns [category total_value], got %v", queryResp["columns"])
 	}
 }
 
