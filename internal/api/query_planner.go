@@ -352,6 +352,9 @@ func buildSQLForIntent(tableName string, intent queryIntent, filters []plannedFi
 		if timeColumn != "" && metric != "" {
 			return buildTrendSQL(tableName, timeColumn, metric, intent.TimeGranularity, whereClause)
 		}
+		if timeColumn != "" {
+			return buildTrendCountSQL(tableName, timeColumn, intent.TimeGranularity, whereClause)
+		}
 	case "share":
 		if dimension != "" && metric != "" {
 			return "SELECT " + dimension + ", ROUND(100.0 * SUM(" + metric + ") / SUM(SUM(" + metric + ")) OVER (), 2) AS share_value FROM " + tableName +
@@ -524,6 +527,20 @@ func buildTrendSQL(tableName, timeColumn, metric, granularity, whereClause strin
 			whereClause + " GROUP BY time_bucket ORDER BY time_bucket ASC;"
 	default:
 		return "SELECT substr(" + timeColumn + ", 1, 7) AS time_bucket, SUM(" + metric + ") AS total_value FROM " + tableName +
+			whereClause + " GROUP BY time_bucket ORDER BY time_bucket ASC;"
+	}
+}
+
+func buildTrendCountSQL(tableName, timeColumn, granularity, whereClause string) string {
+	switch granularity {
+	case "day":
+		return "SELECT substr(" + timeColumn + ", 1, 10) AS time_bucket, COUNT(*) AS total_value FROM " + tableName +
+			whereClause + " GROUP BY time_bucket ORDER BY time_bucket ASC;"
+	case "year":
+		return "SELECT substr(" + timeColumn + ", 1, 4) AS time_bucket, COUNT(*) AS total_value FROM " + tableName +
+			whereClause + " GROUP BY time_bucket ORDER BY time_bucket ASC;"
+	default:
+		return "SELECT substr(" + timeColumn + ", 1, 7) AS time_bucket, COUNT(*) AS total_value FROM " + tableName +
 			whereClause + " GROUP BY time_bucket ORDER BY time_bucket ASC;"
 	}
 }

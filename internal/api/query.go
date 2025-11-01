@@ -696,7 +696,7 @@ func buildAnalysisQuestions(snapshot schemaSnapshot) []string {
 	}
 	table := snapshot.Tables[0]
 	primaryCategory := firstMatchingDimensionColumn(table, []string{"分类", "category", "type", "group", "级别"})
-	secondaryDimension := firstMatchingDimensionColumn(table, []string{"终端", "device", "用户组", "region", "用户", "user"})
+	secondaryDimension := firstMatchingDimensionColumn(table, []string{"终端", "device", "用户组", "region", "级别", "用户", "user"})
 	timeColumn := firstTimeColumn(table)
 
 	questions := make([]string, 0, 4)
@@ -716,13 +716,16 @@ func buildAnalysisQuestions(snapshot schemaSnapshot) []string {
 }
 
 func firstMatchingDimensionColumn(table tableSchema, keywords []string) string {
-	for _, column := range table.Columns {
-		if isMetricColumn(column) || isTimeColumn(column) {
-			continue
-		}
-		name := strings.ToLower(column.Name)
-		if containsAny(name, keywords) {
-			return column.Name
+	for _, keyword := range keywords {
+		lowerKeyword := strings.ToLower(keyword)
+		for _, column := range table.Columns {
+			if isMetricColumn(column) || isTimeColumn(column) {
+				continue
+			}
+			name := strings.ToLower(column.Name)
+			if strings.Contains(name, lowerKeyword) {
+				return column.Name
+			}
 		}
 	}
 	return ""
@@ -793,7 +796,7 @@ func selectedColumnsForPlan(mode, dimension, metric, timeColumn string) []string
 	case "count":
 		return []string{"total_count"}
 	case "trend":
-		if timeColumn != "" && metric != "" {
+		if timeColumn != "" {
 			return []string{"time_bucket", "total_value"}
 		}
 	case "share":
