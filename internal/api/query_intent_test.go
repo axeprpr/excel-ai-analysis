@@ -49,6 +49,25 @@ func TestDetectQueryIntent(t *testing.T) {
 	}
 }
 
+func TestDetectTrendIntentWithoutMetricColumn(t *testing.T) {
+	table := tableSchema{
+		TableName: "webaccess",
+		Columns: []schemaColumn{
+			{Name: "时间", Type: "TEXT", Semantic: "time"},
+			{Name: "终端类型", Type: "TEXT", Semantic: "dimension"},
+			{Name: "URL分类", Type: "TEXT", Semantic: "dimension"},
+		},
+	}
+
+	intent := detectQueryIntent("按时间统计访问趋势折线图", table)
+	if intent.Mode != "trend" {
+		t.Fatalf("expected trend mode, got %q", intent.Mode)
+	}
+	if intent.ChartType != "line" {
+		t.Fatalf("expected line chart, got %q", intent.ChartType)
+	}
+}
+
 func TestDetectQueryIntentSupportsTrendWithoutMetric(t *testing.T) {
 	table := tableSchema{
 		TableName: "webaccess",

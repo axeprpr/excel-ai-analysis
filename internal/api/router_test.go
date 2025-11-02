@@ -1550,6 +1550,10 @@ func TestBroadAnalysisQuestionReturnsMultipleAnalysisViews(t *testing.T) {
 	if !ok || len(report) < 2 {
 		t.Fatalf("expected multiple analysis views, got %v", queryResp["analysis_report"])
 	}
+	queryPlan, ok := queryResp["query_plan"].(map[string]any)
+	if !ok || queryPlan["mode"] != "analysis" {
+		t.Fatalf("expected analysis overview mode, got %v", queryResp["query_plan"])
+	}
 
 	first, ok := report[0].(map[string]any)
 	if !ok {
@@ -1565,6 +1569,27 @@ func TestBroadAnalysisQuestionReturnsMultipleAnalysisViews(t *testing.T) {
 	}
 	if firstPlan["chart_type"] != "pie" {
 		t.Fatalf("expected first analysis view to be pie, got %v", firstPlan["chart_type"])
+	}
+	if len(report) < 3 {
+		t.Fatalf("expected at least 3 analysis views, got %d", len(report))
+	}
+	third, ok := report[2].(map[string]any)
+	if !ok {
+		t.Fatalf("expected third analysis view to be an object")
+	}
+	thirdResponse, ok := third["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected third analysis view response payload")
+	}
+	thirdPlan, ok := thirdResponse["query_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_plan in third analysis view")
+	}
+	if thirdPlan["mode"] != "trend" {
+		t.Fatalf("expected third analysis view to be trend, got %v", thirdPlan["mode"])
+	}
+	if thirdPlan["chart_type"] != "line" {
+		t.Fatalf("expected third analysis view to be line, got %v", thirdPlan["chart_type"])
 	}
 }
 

@@ -135,7 +135,7 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 	}
 	if shouldBuildAnalysisReport(req.Question) {
 		if report := h.buildAnalysisReport(meta, settings, snapshot, chartMode); len(report) > 0 {
-			response["analysis_report"] = report
+			return buildAnalysisOverviewResponse(meta.SessionID, req.Question, chartMode, report), nil
 		}
 	}
 	return response, nil
@@ -704,15 +704,82 @@ func buildAnalysisQuestions(snapshot schemaSnapshot) []string {
 		questions = append(questions, "按"+primaryCategory+"统计访问量分布饼图")
 	}
 	if secondaryDimension != "" && secondaryDimension != primaryCategory {
-		questions = append(questions, "按"+secondaryDimension+"统计访问量柱状图")
+		questions = append(questions, "按"+secondaryDimension+"统计访问次数柱状图")
 	}
 	if timeColumn != "" {
-		questions = append(questions, "按时间统计访问趋势")
+		questions = append(questions, "按时间统计访问趋势折线图")
 	}
 	if primaryCategory == "" && secondaryDimension == "" {
 		questions = append(questions, "按维度统计访问量分布饼图")
 	}
 	return questions
+}
+
+func buildAnalysisOverviewResponse(sessionID, question, chartMode string, report []map[string]any) map[string]any {
+	sectionTitles := make([]string, 0, len(report))
+	primaryPlan := queryPlan{
+		Question:  question,
+		Mode:      "analysis",
+		ChartType: "report",
+	}
+
+	for _, section := range report {
+		title, _ := section["title"].(string)
+		if title != "" {
+			sectionTitles = append(sectionTitles, title)
+		}
+		response, ok := section["response"].(map[string]any)
+		if !ok {
+			continue
+		}
+		planMap, ok := response["query_plan"].(map[string]any)
+		if !ok {
+			continue
+		}
+		primaryPlan.SourceTable, _ = planMap["source_table"].(string)
+		primaryPlan.SourceFile, _ = planMap["source_file"].(string)
+		primaryPlan.SourceSheet, _ = planMap["source_sheet"].(string)
+		if candidateTables, ok := planMap["candidate_tables"].([]any); ok {
+			for _, item := range candidateTables {
+				if name, ok := item.(string); ok {
+					primaryPlan.CandidateTables = append(primaryPlan.CandidateTables, name)
+				}
+			}
+		}
+		if confidence, ok := planMap["planning_confidence"].(float64); ok {
+			primaryPlan.PlanningConfidence = confidence
+		}
+		primaryPlan.SelectionReason, _ = planMap["selection_reason"].(string)
+		break
+	}
+
+	if primaryPlan.SelectionReason == "" {
+		primaryPlan.SelectionReason = "built from the imported session dataset using automatic multi-view analysis planning"
+	}
+
+	summary := "Built an automatic analysis report with " + strconv.Itoa(len(report)) + " views."
+	if len(sectionTitles) > 0 {
+		summary += " Views: " + strings.Join(sectionTitles, " / ") + "."
+	}
+
+	return map[string]any{
+		"session_id": sessionID,
+		"question":   question,
+		"sql":        "",
+		"rows": []map[string]any{
+			{"analysis_view_count": len(report)},
+		},
+		"columns":       []string{"analysis_view_count"},
+		"row_count":     len(report),
+		"executed":      true,
+		"chart_mode":    chartMode,
+		"summary":       summary,
+		"query_plan":    primaryPlan,
+		"visualization": map[string]any{"type": "report", "title": question},
+		"chart":         map[string]any{"mode": chartMode, "type": "report"},
+		"warnings":      []string{},
+		"analysis_report": report,
+	}
 }
 
 func firstMatchingDimensionColumn(table tableSchema, keywords []string) string {
