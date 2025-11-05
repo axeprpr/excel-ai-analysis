@@ -811,12 +811,16 @@ function AssistantMessageBody({ response, compact = false }: { response: QueryRe
   const chart = (response.chart || {}) as Record<string, unknown>
   const visualization = (response.visualization || {}) as Record<string, unknown>
   const queryPlan = response.query_plan
+  const isAnalysisOverview = queryPlan?.mode === "analysis" && (response.analysis_report?.length || 0) > 0
   const mcpResult = (chart.result || {}) as Record<string, unknown>
   const mcpURL =
     typeof chart.url === "string" ? chart.url : typeof mcpResult.url === "string" ? mcpResult.url : ""
   const mcpExecuted = typeof chart.executed === "boolean" ? chart.executed : false
   const mcpTool = String(chart.tool || mcpResult.tool_name || "")
   const mcpError = String(chart.error || "")
+  const hasStructuredData =
+    columns.length > 0 || rows.length > 0 || Object.keys(visualization).length > 0
+  const hasSQL = Boolean(response.sql?.trim())
 
   return (
     <>
@@ -840,6 +844,11 @@ function AssistantMessageBody({ response, compact = false }: { response: QueryRe
             <Badge className="bg-emerald-100 text-emerald-700">
               confidence: {Math.round((queryPlan.planning_confidence || 0) * 100)}%
             </Badge>
+            {isAnalysisOverview ? (
+              <Badge className="bg-violet-100 text-violet-700">
+                views: {response.analysis_report?.length || 0}
+              </Badge>
+            ) : null}
           </div>
           <div className="grid gap-1 text-xs text-stone-600">
             <div>
@@ -851,36 +860,40 @@ function AssistantMessageBody({ response, compact = false }: { response: QueryRe
           </div>
         </div>
       ) : null}
-      <pre className="overflow-auto rounded-2xl bg-stone-950 p-4 text-xs text-stone-100">{response.sql}</pre>
+      {hasSQL ? (
+        <pre className="overflow-auto rounded-2xl bg-stone-950 p-4 text-xs text-stone-100">{response.sql}</pre>
+      ) : null}
 
-      <div className="rounded-[24px] border border-stone-200 bg-stone-50 p-4">
-        {chart.mode === "mermaid" ? (
-          <MermaidChart content={String(chart.content || "")} />
-        ) : chart.mode === "mcp" ? (
-          <div className="grid gap-3">
-            <div className="flex flex-wrap gap-2 text-xs">
-              <Badge className={mcpExecuted ? "bg-emerald-100 text-emerald-700" : "bg-stone-200 text-stone-700"}>
-                executed: {String(mcpExecuted)}
-              </Badge>
-              {mcpTool ? <Badge className="bg-orange-100 text-orange-700">{mcpTool}</Badge> : null}
+      {!isAnalysisOverview && (chart.mode === "mermaid" || chart.mode === "mcp" || hasStructuredData) ? (
+        <div className="rounded-[24px] border border-stone-200 bg-stone-50 p-4">
+          {chart.mode === "mermaid" ? (
+            <MermaidChart content={String(chart.content || "")} />
+          ) : chart.mode === "mcp" ? (
+            <div className="grid gap-3">
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge className={mcpExecuted ? "bg-emerald-100 text-emerald-700" : "bg-stone-200 text-stone-700"}>
+                  executed: {String(mcpExecuted)}
+                </Badge>
+                {mcpTool ? <Badge className="bg-orange-100 text-orange-700">{mcpTool}</Badge> : null}
+              </div>
+              {mcpURL ? (
+                <img
+                  src={mcpURL}
+                  alt="Rendered MCP chart"
+                  className="max-h-[320px] rounded-2xl border border-stone-200 bg-white object-contain"
+                />
+              ) : null}
+              {mcpError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{mcpError}</div>
+              ) : null}
             </div>
-            {mcpURL ? (
-              <img
-                src={mcpURL}
-                alt="Rendered MCP chart"
-                className="max-h-[320px] rounded-2xl border border-stone-200 bg-white object-contain"
-              />
-            ) : null}
-            {mcpError ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{mcpError}</div>
-            ) : null}
-          </div>
-        ) : (
-          <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
-            {JSON.stringify({ columns, rows, visualization }, null, 2)}
-          </pre>
-        )}
-      </div>
+          ) : (
+            <pre className="overflow-auto rounded-xl bg-white p-3 text-xs text-stone-700">
+              {JSON.stringify({ columns, rows, visualization }, null, 2)}
+            </pre>
+          )}
+        </div>
+      ) : null}
     </>
   )
 }
