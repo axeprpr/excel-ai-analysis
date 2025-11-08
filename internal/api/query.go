@@ -129,20 +129,25 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 		return nil, errors.New("failed to update session metadata")
 	}
 
-	response, err := h.executeSingleQuery(meta, settings, snapshot, req.Question, chartMode)
-	if err != nil {
-		return nil, err
-	}
 	if shouldBuildAnalysisReport(req.Question) {
 		if report := h.buildAnalysisReport(meta, settings, snapshot, chartMode); len(report) > 0 {
 			return buildAnalysisOverviewResponse(meta.SessionID, req.Question, chartMode, report), nil
 		}
 	}
-	return response, nil
+	return h.executeSingleQuery(meta, settings, snapshot, req.Question, chartMode)
 }
 
 func (h *Handler) executeSingleQuery(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, question, chartMode string) (map[string]any, error) {
 	plan, plannerWarnings := h.buildQueryPlanWithFallback(settings, snapshot, question)
+	return h.executePlannedQuery(meta, settings, snapshot, question, chartMode, plan, plannerWarnings)
+}
+
+func (h *Handler) executeHeuristicSingleQuery(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, question, chartMode string) (map[string]any, error) {
+	plan, plannerWarnings := h.buildHeuristicQueryPlan(settings, snapshot, question)
+	return h.executePlannedQuery(meta, settings, snapshot, question, chartMode, plan, plannerWarnings)
+}
+
+func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, question, chartMode string, plan queryPlan, plannerWarnings []string) (map[string]any, error) {
 	execResult := executePlanQuery(meta.DatabasePath, plan)
 	if shouldRetryLLMRepair(plannerWarnings, execResult) {
 		repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, question, plan, execResult)
@@ -674,7 +679,7 @@ func (h *Handler) buildAnalysisReport(meta sessionMetadata, settings modelSettin
 			continue
 		}
 		seen[item] = struct{}{}
-		response, err := h.executeSingleQuery(meta, settings, snapshot, item, chartMode)
+		response, err := h.executeHeuristicSingleQuery(meta, settings, snapshot, item, chartMode)
 		if err != nil {
 			continue
 		}

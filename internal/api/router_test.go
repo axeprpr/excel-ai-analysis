@@ -1554,6 +1554,13 @@ func TestBroadAnalysisQuestionReturnsMultipleAnalysisViews(t *testing.T) {
 	if !ok || queryPlan["mode"] != "analysis" {
 		t.Fatalf("expected analysis overview mode, got %v", queryResp["query_plan"])
 	}
+	summary, _ := queryResp["summary"].(string)
+	if !strings.Contains(summary, "automatic analysis report") {
+		t.Fatalf("expected analysis overview summary, got %q", summary)
+	}
+	if rowCount, ok := queryResp["row_count"].(float64); !ok || int(rowCount) != 3 {
+		t.Fatalf("expected row_count to reflect analysis view count, got %v", queryResp["row_count"])
+	}
 
 	first, ok := report[0].(map[string]any)
 	if !ok {
