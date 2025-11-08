@@ -108,7 +108,7 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 
 func normalizeIntentMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "detail", "aggregate", "topn", "trend", "count", "share", "compare":
+	case "detail", "aggregate", "topn", "trend", "count", "share", "compare", "refuse":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return ""

@@ -84,6 +84,7 @@ type QueryResponse = {
   warnings?: string[]
   row_count: number
   executed: boolean
+  refused?: boolean
   analysis_report?: {
     title: string
     question: string
@@ -812,6 +813,7 @@ function AssistantMessageBody({ response, compact = false }: { response: QueryRe
   const visualization = (response.visualization || {}) as Record<string, unknown>
   const queryPlan = response.query_plan
   const isAnalysisOverview = queryPlan?.mode === "analysis" && (response.analysis_report?.length || 0) > 0
+  const refused = response.refused === true
   const mcpResult = (chart.result || {}) as Record<string, unknown>
   const mcpURL =
     typeof chart.url === "string" ? chart.url : typeof mcpResult.url === "string" ? mcpResult.url : ""
@@ -844,6 +846,7 @@ function AssistantMessageBody({ response, compact = false }: { response: QueryRe
             <Badge className="bg-emerald-100 text-emerald-700">
               confidence: {Math.round((queryPlan.planning_confidence || 0) * 100)}%
             </Badge>
+            {refused ? <Badge className="bg-red-100 text-red-700">refused</Badge> : null}
             {isAnalysisOverview ? (
               <Badge className="bg-violet-100 text-violet-700">
                 views: {response.analysis_report?.length || 0}

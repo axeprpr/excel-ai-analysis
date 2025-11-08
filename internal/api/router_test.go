@@ -1118,7 +1118,7 @@ func TestCSVUploadImportsRowsIntoSQLite(t *testing.T) {
 		t.Fatalf("expected mermaid content to contain xychart-beta, got %q", mermaidContent)
 	}
 
-	mcpBody := bytes.NewBufferString(`{"question":"可以生成一个柱状图吗","chart_mode":"mcp"}`)
+	mcpBody := bytes.NewBufferString(`{"question":"按column_1生成柱状图","chart_mode":"mcp"}`)
 	mcpReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", mcpBody)
 	mcpReq.Header.Set("Content-Type", "application/json")
 	mcpRec := httptest.NewRecorder()
@@ -1600,6 +1600,150 @@ func TestBroadAnalysisQuestionReturnsMultipleAnalysisViews(t *testing.T) {
 	}
 }
 
+func TestExplicitPieChartWithoutClearAnalysisTargetIsRejected(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+
+	csvData := strings.Join([]string{
+		"user,value",
+		"user_1,1",
+		"user_2,2",
+		"user_3,3",
+		"user_4,4",
+	}, "\n") + "\n"
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "simple.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(csvData)); err != nil {
+		t.Fatalf("failed to write csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 200, 20*time.Millisecond)
+
+	queryBody := bytes.NewBufferString(`{"question":"可以生成一个饼图吗","chart_mode":"data"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode query response: %v", err)
+	}
+	refused, _ := queryResp["refused"].(bool)
+	if !refused {
+		t.Fatalf("expected query to be refused, got %v", queryResp)
+	}
+	if queryResp["sql"] != "" {
+		t.Fatalf("expected refused query to omit sql, got %v", queryResp["sql"])
+	}
+}
+
+func TestExplicitLineChartWithoutTimeFieldIsRejected(t *testing.T) {
+	dataDir := t.TempDir()
+	handler := NewHandler(dataDir)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createRec.Code)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	sessionID, _ := created["session_id"].(string)
+
+	csvData := strings.Join([]string{
+		"category,amount",
+		"A,10",
+		"B,12",
+		"C,15",
+	}, "\n") + "\n"
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sales.csv")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(csvData)); err != nil {
+		t.Fatalf("failed to write csv data: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, uploadRec.Code)
+	}
+	var uploadResp map[string]any
+	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	taskID, _ := uploadResp["task_id"].(string)
+	waitForImportTaskStatusWithTimeout(t, handler, sessionID, taskID, "completed", 200, 20*time.Millisecond)
+
+	queryBody := bytes.NewBufferString(`{"question":"请画一个折线图","chart_mode":"data"}`)
+	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, queryRec.Code)
+	}
+
+	var queryResp map[string]any
+	if err := json.Unmarshal(queryRec.Body.Bytes(), &queryResp); err != nil {
+		t.Fatalf("failed to decode query response: %v", err)
+	}
+	refused, _ := queryResp["refused"].(bool)
+	if !refused {
+		t.Fatalf("expected query to be refused, got %v", queryResp)
+	}
+}
+
 func TestCSVUploadImportsGBKEncodedChineseCSV(t *testing.T) {
 	dataDir := t.TempDir()
 	handler := NewHandler(dataDir)
@@ -2025,7 +2169,7 @@ func TestXLSXUploadSkipsLeadingEmptyRowsAndBlankDataRows(t *testing.T) {
 		t.Fatalf("expected 2 imported xlsx rows after skipping blanks, got %q", string(bytes.TrimSpace(rowCountOutput)))
 	}
 
-	queryBody := bytes.NewBufferString(`{"question":"可以生成一个柱状图吗","chart_mode":"data"}`)
+	queryBody := bytes.NewBufferString(`{"question":"按category生成柱状图","chart_mode":"data"}`)
 	queryReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/query", queryBody)
 	queryReq.Header.Set("Content-Type", "application/json")
 	queryRec := httptest.NewRecorder()

@@ -18,8 +18,10 @@ type llmSQLRequest struct {
 }
 
 type llmSQLResponse struct {
-	SQL  string `json:"sql"`
-	Mode string `json:"mode"`
+	SQL    string `json:"sql"`
+	Mode   string `json:"mode"`
+	Refuse bool   `json:"refuse,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type openAIChatRequest struct {
@@ -81,11 +83,12 @@ func (h *Handler) generateSQLWithOpenAICompatible(settings modelSettings, req ll
 			{
 				Role: "system",
 				Content: "You generate read-only SQLite SQL for the user's question. " +
-					"Return strict JSON with keys sql and mode. " +
-					"Allowed modes are detail, aggregate, topn, trend, count, share, compare. " +
+					"Return strict JSON with keys sql, mode, refuse, and reason. " +
+					"Allowed modes are detail, aggregate, topn, trend, count, share, compare, refuse. " +
 					"Only generate a single read-only SELECT or WITH statement for SQLite. " +
 					"Prefer aggregation over raw detail when the user asks for analysis, distribution, summary, counts, or charts. " +
-					"If a detail query could return many rows, add a LIMIT no greater than 200.",
+					"If a detail query could return many rows, add a LIMIT no greater than 200. " +
+					"If the request is ambiguous, unsupported by the schema, or asks for a chart without enough evidence for a valid chart, set refuse=true, provide a short reason, and leave sql empty.",
 			},
 			{
 				Role:    "user",

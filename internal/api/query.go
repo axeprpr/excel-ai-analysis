@@ -148,6 +148,10 @@ func (h *Handler) executeHeuristicSingleQuery(meta sessionMetadata, settings mod
 }
 
 func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, question, chartMode string, plan queryPlan, plannerWarnings []string) (map[string]any, error) {
+	if refusalReason := queryRefusalReason(meta.DatabasePath, question, plan); refusalReason != "" {
+		return buildRefusalResponse(meta.SessionID, question, chartMode, plan, plannerWarnings, refusalReason), nil
+	}
+
 	execResult := executePlanQuery(meta.DatabasePath, plan)
 	if shouldRetryLLMRepair(plannerWarnings, execResult) {
 		repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, question, plan, execResult)
@@ -166,6 +170,9 @@ func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettin
 			plannerWarnings = append(plannerWarnings, heuristicWarnings...)
 			plannerWarnings = append(plannerWarnings, "LLM SQL execution failed; the service repaired the query by falling back to the heuristic planner.")
 		}
+	}
+	if refusalReason := queryRefusalReason(meta.DatabasePath, question, plan); refusalReason != "" {
+		return buildRefusalResponse(meta.SessionID, question, chartMode, plan, plannerWarnings, refusalReason), nil
 	}
 	rows, columns, executed := execResult.Rows, execResult.Cols, execResult.OK
 	if !executed || len(columns) == 0 || len(rows) == 0 {
@@ -192,6 +199,7 @@ func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettin
 		"columns":       columns,
 		"row_count":     effectiveRowCount(execResult, len(rows)),
 		"executed":      executed,
+		"refused":       false,
 		"chart_mode":    chartMode,
 		"summary":       buildQuerySummary(plan, executed, effectiveRowCount(execResult, len(rows))),
 		"query_plan":    plan,
@@ -227,6 +235,13 @@ func (h *Handler) repairQueryPlanWithLLM(settings modelSettings, snapshot schema
 		if err != nil {
 			return failedPlan, []string{"LLM SQL repair failed after multiple attempts; falling back to heuristic repair if available."}, false
 		}
+	}
+	if llmResp.Refuse {
+		repairedPlan := failedPlan
+		repairedPlan.Mode = "refuse"
+		repairedPlan.SQL = ""
+		repairedPlan.SelectionReason = strings.TrimSpace(llmResp.Reason)
+		return repairedPlan, []string{"LLM declined to repair the query because the request remained ambiguous or unsupported."}, true
 	}
 	safeSQL, validationErr := sanitizeReadOnlySQL(llmResp.SQL)
 	if validationErr != nil {
@@ -276,6 +291,13 @@ func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, snapshot sc
 		if err != nil {
 			return heuristicPlan, append(heuristicWarnings, "LLM SQL generation failed after multiple attempts; using heuristic query planner.")
 		}
+	}
+	if llmResp.Refuse {
+		refusalPlan := heuristicPlan
+		refusalPlan.Mode = "refuse"
+		refusalPlan.SQL = ""
+		refusalPlan.SelectionReason = strings.TrimSpace(llmResp.Reason)
+		return refusalPlan, append(heuristicWarnings, "The configured LLM declined to answer because the request was ambiguous or unsupported.")
 	}
 	safeSQL, validationErr := sanitizeReadOnlySQL(llmResp.SQL)
 	if validationErr != nil {
@@ -562,6 +584,38 @@ func queryWarnings(plan queryPlan, result queryExecutionResult) []string {
 	return warnings
 }
 
+func buildRefusalResponse(sessionID, question, chartMode string, plan queryPlan, plannerWarnings []string, reason string) map[string]any {
+	if strings.TrimSpace(reason) == "" {
+		reason = "The request is not specific enough to produce a reliable answer."
+	}
+	if plan.Mode == "" {
+		plan.Mode = "refuse"
+	} else {
+		plan.Mode = "refuse"
+	}
+	plan.SQL = ""
+
+	return map[string]any{
+		"session_id":    sessionID,
+		"question":      question,
+		"sql":           "",
+		"rows":          []map[string]any{},
+		"columns":       []string{},
+		"row_count":     0,
+		"executed":      false,
+		"refused":       true,
+		"chart_mode":    chartMode,
+		"summary":       reason,
+		"query_plan":    plan,
+		"visualization": map[string]any{"type": "none", "title": question},
+		"chart":         map[string]any{"mode": chartMode, "type": "none"},
+		"warnings": append(
+			append([]string{}, plannerWarnings...),
+			"Please rephrase the question with a specific analysis target, dimension, metric, or time field.",
+		),
+	}
+}
+
 func effectiveRowCount(result queryExecutionResult, fallback int) int {
 	if result.TotalCount > 0 {
 		return result.TotalCount
@@ -658,6 +712,88 @@ func llmPlanningHints(plan queryPlan) []string {
 		hints = append(hints, "Preferred selected columns: "+strings.Join(plan.SelectedColumns, ", "))
 	}
 	return hints
+}
+
+func queryRefusalReason(databasePath, question string, plan queryPlan) string {
+	if plan.Mode == "refuse" {
+		if strings.TrimSpace(plan.SelectionReason) != "" {
+			return plan.SelectionReason
+		}
+		return "The request is ambiguous for the available schema."
+	}
+
+	requestedChart := requestedChartType(question)
+	if requestedChart == "" {
+		return ""
+	}
+	if questionOnlyAsksForChart(question) {
+		return "The request only asks for a chart type, but does not specify what should be analyzed. Please mention a field, metric, or analysis target."
+	}
+
+	switch requestedChart {
+	case "pie":
+		if plan.ChartType != "pie" || plan.Mode != "share" || strings.TrimSpace(plan.DimensionColumn) == "" {
+			return "A pie chart needs a clear categorical breakdown. Please specify the dimension you want to distribute, such as category, type, or level."
+		}
+		if reason := validatePieChartFeasibility(databasePath, plan); reason != "" {
+			return reason
+		}
+	case "line":
+		if strings.TrimSpace(plan.TimeColumn) == "" || (plan.Mode != "trend" && plan.Mode != "compare") {
+			return "A line chart needs a clear time field. Please ask with a time dimension such as day, month, or year."
+		}
+	case "bar":
+		if strings.TrimSpace(plan.DimensionColumn) == "" {
+			return "A bar chart needs a clear category dimension. Please specify what should be grouped on the x-axis."
+		}
+	}
+
+	return ""
+}
+
+func requestedChartType(question string) string {
+	q := strings.ToLower(strings.TrimSpace(question))
+	switch {
+	case hasAny(q, "饼图", "pie chart"):
+		return "pie"
+	case hasAny(q, "折线图", "line chart", "line graph"):
+		return "line"
+	case hasAny(q, "柱状图", "条形图", "bar chart", "bar graph"):
+		return "bar"
+	default:
+		return ""
+	}
+}
+
+func questionOnlyAsksForChart(question string) bool {
+	q := strings.ToLower(strings.TrimSpace(question))
+	replacer := strings.NewReplacer(
+		"可以", " ", "请", " ", "帮我", " ", "帮忙", " ", "生成", " ", "画", " ", "做", " ", "一个", " ",
+		"一张", " ", "图", " ", "chart", " ", "graph", " ", "please", " ", "show", " ", "make", " ", "draw", " ",
+		"饼图", " ", "pie chart", " ", "柱状图", " ", "条形图", " ", "bar chart", " ", "bar graph", " ",
+		"折线图", " ", "line chart", " ", "line graph", " ", "吗", " ", "？", " ", "?", " ",
+	)
+	trimmed := strings.Join(strings.Fields(replacer.Replace(q)), " ")
+	return trimmed == ""
+}
+
+func validatePieChartFeasibility(databasePath string, plan queryPlan) string {
+	if strings.TrimSpace(plan.SourceTable) == "" || strings.TrimSpace(plan.DimensionColumn) == "" {
+		return "A pie chart needs a categorical dimension, but none was selected reliably."
+	}
+	sql := "SELECT COUNT(DISTINCT " + plan.DimensionColumn + ") AS distinct_count, COUNT(*) AS total_count FROM " + plan.SourceTable + ";"
+	result := executeQueryIfPossible(databasePath, sql, []string{"distinct_count", "total_count"})
+	if !result.OK || len(result.Rows) == 0 {
+		return "The service could not verify that the selected field is suitable for a pie chart. Please ask more specifically."
+	}
+	distinctCount, _ := readIntValue(result.Rows[0]["distinct_count"])
+	if distinctCount < 2 {
+		return "The selected field does not have enough categories for a pie chart."
+	}
+	if distinctCount > 12 {
+		return "The selected field has too many categories for a reliable pie chart. Please ask for top categories or specify a narrower grouping."
+	}
+	return ""
 }
 
 func shouldBuildAnalysisReport(question string) bool {
