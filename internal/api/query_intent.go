@@ -25,13 +25,11 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 	if hasAny(q, "同比", "环比", "compare", "comparison", "versus", "vs", "对比") {
 		intent.Comparison = true
 		intent.Mode = "compare"
-		intent.ChartType = "bar"
 	}
 	if hasAny(q, "同比", "yoy", "year over year") {
 		intent.Comparison = true
 		intent.ComparisonType = "yoy"
 		intent.Mode = "compare"
-		intent.ChartType = "line"
 		intent.HasTimeReference = true
 		if intent.TimeGranularity == "" {
 			intent.TimeGranularity = "year"
@@ -41,7 +39,6 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 		intent.Comparison = true
 		intent.ComparisonType = "mom"
 		intent.Mode = "compare"
-		intent.ChartType = "line"
 		intent.HasTimeReference = true
 		if intent.TimeGranularity == "" {
 			intent.TimeGranularity = "month"
@@ -50,7 +47,6 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 	if hasAny(q, "占比", "比例", "分布", "构成", "share", "distribution", "composition") {
 		intent.Share = true
 		intent.Mode = "share"
-		intent.ChartType = "pie"
 	}
 	if hasAny(q, "柱状图", "条形图", "bar chart", "bar graph") {
 		intent.ChartType = "bar"
@@ -64,7 +60,6 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 	if hasAny(q, "top", "rank", "highest", "排名", "最高", "最多", "lowest", "最低") {
 		intent.Ranking = true
 		intent.Mode = "topn"
-		intent.ChartType = "bar"
 	}
 	if hasAny(q, "count", "how many", "number of", "多少", "几个", "几条") {
 		intent.Mode = "count"
@@ -75,7 +70,6 @@ func detectQueryIntent(question string, table tableSchema) queryIntent {
 	if hasAny(q, "trend", "over time", "by month", "monthly", "by day", "daily", "按月", "按天", "趋势") &&
 		firstTimeColumn(table) != "" {
 		intent.Mode = "trend"
-		intent.ChartType = "line"
 		intent.HasTimeReference = true
 	}
 

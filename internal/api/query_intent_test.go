@@ -19,16 +19,16 @@ func TestDetectQueryIntent(t *testing.T) {
 		wantFilter      bool
 		wantCompareType string
 	}{
-		{"show sales trend by month", "trend", "line", false, ""},
-		{"top categories by revenue", "topn", "bar", false, ""},
+		{"show sales trend by month", "trend", "table", false, ""},
+		{"top categories by revenue", "topn", "table", false, ""},
 		{"count rows this month", "count", "table", true, ""},
-		{"show category share", "share", "pie", false, ""},
-		{"compare category revenue", "compare", "bar", false, ""},
+		{"show category share", "share", "table", false, ""},
+		{"compare category revenue", "compare", "table", false, ""},
 		{"可以生成一个柱状图吗", "topn", "bar", false, ""},
 		{"请画一个折线图", "trend", "line", false, ""},
 		{"给我一个饼图", "share", "pie", false, ""},
-		{"同比销售额", "compare", "line", false, "yoy"},
-		{"mom revenue", "compare", "line", false, "mom"},
+		{"同比销售额", "compare", "table", false, "yoy"},
+		{"mom revenue", "compare", "table", false, "mom"},
 		{"detail rows for east", "detail", "table", true, ""},
 	}
 
@@ -81,8 +81,8 @@ func TestDetectQueryIntentSupportsTrendWithoutMetric(t *testing.T) {
 	if intent.Mode != "trend" {
 		t.Fatalf("expected trend mode, got %q", intent.Mode)
 	}
-	if intent.ChartType != "line" {
-		t.Fatalf("expected line chart, got %q", intent.ChartType)
+	if intent.ChartType != "table" {
+		t.Fatalf("expected table chart type without explicit chart request, got %q", intent.ChartType)
 	}
 	if !intent.HasTimeReference {
 		t.Fatalf("expected time reference to be set")
