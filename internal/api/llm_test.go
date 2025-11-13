@@ -99,7 +99,7 @@ func TestBuildQueryPlanWithFallbackRejectsUnsafeLLMSQL(t *testing.T) {
 		t.Fatalf("expected multiple statements to be unsafe")
 	}
 
-	plan, warnings := handler.buildQueryPlanWithFallback(settings, snapshot, "show sales by category")
+	plan, warnings := handler.buildQueryPlanWithFallback(settings, "", snapshot, "show sales by category")
 	if plan.SQL == "" {
 		t.Fatalf("expected fallback sql to be populated")
 	}
@@ -112,6 +112,7 @@ func TestBuildLLMSQLPromptIncludesPlanningHints(t *testing.T) {
 	prompt := buildLLMSQLPrompt(llmSQLRequest{
 		Question:      "帮我做个上网行为分析",
 		Schema:        schemaSnapshot{Tables: []tableSchema{{TableName: "webaccess"}}},
+		SchemaFacts:   []llmTableFact{{TableName: "webaccess", RowCount: 100, Columns: []llmColumnFact{{Name: "category", Semantic: "dimension", NonNullSamples: []string{"A", "B"}}}}},
 		PlanningHints: []string{"Preferred source table: webaccess", "Prefer an aggregated summary."},
 	})
 
@@ -120,6 +121,12 @@ func TestBuildLLMSQLPromptIncludesPlanningHints(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Preferred source table: webaccess") {
 		t.Fatalf("expected prompt to include source table hint")
+	}
+	if !strings.Contains(prompt, "Schema Facts") {
+		t.Fatalf("expected prompt to include schema facts")
+	}
+	if !strings.Contains(prompt, "\"non_null_samples\":[\"A\",\"B\"]") {
+		t.Fatalf("expected prompt to include sampled values")
 	}
 }
 
@@ -159,5 +166,63 @@ func TestResolveLLMProviderTreatsBaseURLLikeOpenAICompatible(t *testing.T) {
 		APIKey:   "test-key",
 	}) {
 		t.Fatalf("expected llmEnabled to accept base-url-style provider values")
+	}
+}
+
+func TestBuildQueryPlanWithFallbackUsesLLMSelectedTableAndColumns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(openAIChatResponse{
+			Choices: []struct {
+				Message openAIChatMessage `json:"message"`
+			}{
+				{
+					Message: openAIChatMessage{
+						Role: "assistant",
+						Content: "{\"sql\":\"SELECT region, total_count FROM customers;\",\"mode\":\"topn\",\"source_table\":\"customers\",\"dimension_column\":\"region\",\"chart_type\":\"bar\"}",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	handler := &Handler{}
+	settings := modelSettings{
+		Provider: "openai-compatible",
+		Model:    "Qwen/Qwen3.5-9B",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+	}
+	snapshot := schemaSnapshot{
+		Tables: []tableSchema{
+			{
+				TableName: "sales",
+				Columns: []schemaColumn{
+					{Name: "category", Type: "TEXT", Semantic: "dimension"},
+					{Name: "amount", Type: "REAL", Semantic: "metric"},
+				},
+			},
+			{
+				TableName: "customers",
+				Columns: []schemaColumn{
+					{Name: "region", Type: "TEXT", Semantic: "dimension"},
+					{Name: "customer_count", Type: "INTEGER", Semantic: "metric"},
+				},
+			},
+		},
+	}
+
+	plan, warnings := handler.buildQueryPlanWithFallback(settings, "", snapshot, "show customer regions")
+	if plan.SourceTable != "customers" {
+		t.Fatalf("expected LLM-selected source table customers, got %q", plan.SourceTable)
+	}
+	if plan.DimensionColumn != "region" {
+		t.Fatalf("expected LLM-selected dimension column region, got %q", plan.DimensionColumn)
+	}
+	if plan.ChartType != "bar" {
+		t.Fatalf("expected LLM-selected chart type bar, got %q", plan.ChartType)
+	}
+	if len(warnings) == 0 {
+		t.Fatalf("expected llm warning metadata")
 	}
 }

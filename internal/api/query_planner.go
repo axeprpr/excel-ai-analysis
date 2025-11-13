@@ -164,7 +164,6 @@ func tableMatchScore(question string, table tableSchema) int {
 	score += countTokenMatches(normalizedQuestion, normalizeNameTokens(table.TableName)) * 5
 	score += countTokenMatches(normalizedQuestion, normalizeNameTokens(stripExtension(table.SourceFile))) * 4
 	score += countTokenMatches(normalizedQuestion, normalizeNameTokens(table.SourceSheet)) * 2
-	score += businessConceptScore(normalizedQuestion, table) * 3
 
 	for _, column := range table.Columns {
 		columnWeight := 1
@@ -183,57 +182,6 @@ func tableMatchScore(question string, table tableSchema) int {
 	return score
 }
 
-func businessConceptScore(question string, table tableSchema) int {
-	score := 0
-	for _, concept := range businessConcepts() {
-		if !containsAny(question, concept.QuestionTerms) {
-			continue
-		}
-		if containsAny(strings.ToLower(table.TableName), concept.TableTerms) ||
-			containsAny(strings.ToLower(stripExtension(table.SourceFile)), concept.TableTerms) {
-			score += 3
-		}
-		for _, column := range table.Columns {
-			columnName := strings.ToLower(column.Name)
-			if containsAny(columnName, concept.ColumnTerms) {
-				score += 2
-			}
-		}
-	}
-	return score
-}
-
-type businessConcept struct {
-	QuestionTerms []string
-	TableTerms    []string
-	ColumnTerms   []string
-}
-
-func businessConcepts() []businessConcept {
-	return []businessConcept{
-		{
-			QuestionTerms: []string{"sales", "revenue", "gmv", "成交额", "销售额", "营收"},
-			TableTerms:    []string{"sales", "revenue", "orders", "transactions"},
-			ColumnTerms:   []string{"amount", "revenue", "gmv", "sales", "price", "total"},
-		},
-		{
-			QuestionTerms: []string{"customer", "customers", "user", "users", "客户", "用户"},
-			TableTerms:    []string{"customer", "customers", "user", "users", "accounts"},
-			ColumnTerms:   []string{"customer", "user", "account", "member"},
-		},
-		{
-			QuestionTerms: []string{"order", "orders", "订单"},
-			TableTerms:    []string{"order", "orders", "sales", "transactions"},
-			ColumnTerms:   []string{"order", "amount", "transaction"},
-		},
-		{
-			QuestionTerms: []string{"product", "products", "sku", "商品", "产品"},
-			TableTerms:    []string{"product", "products", "catalog", "inventory"},
-			ColumnTerms:   []string{"product", "sku", "category", "brand"},
-		},
-	}
-}
-
 func semanticHintMatches(question, semantic string) bool {
 	switch semantic {
 	case "metric":
@@ -241,9 +189,8 @@ func semanticHintMatches(question, semantic string) bool {
 			strings.Contains(question, "total") ||
 			strings.Contains(question, "count") ||
 			strings.Contains(question, "amount") ||
-			strings.Contains(question, "sales") ||
-			strings.Contains(question, "revenue") ||
-			strings.Contains(question, "数量")
+			strings.Contains(question, "数量") ||
+			strings.Contains(question, "次数")
 	case "time":
 		return strings.Contains(question, "trend") ||
 			strings.Contains(question, "time") ||
@@ -454,31 +401,15 @@ func dimensionColumnScore(question string, intent queryIntent, column schemaColu
 			score += 8
 		}
 	}
-	if containsAny(strings.ToLower(question), []string{"网页", "浏览", "url", "网站"}) {
-		if containsAny(name, []string{"url分类", "url_分类", "分类"}) {
-			score += 10
+	if isLikelyHighCardinalityIdentifier(column) {
+		switch intent.ChartType {
+		case "pie":
+			score -= 8
+		case "bar", "line":
+			score -= 4
+		default:
+			score -= 2
 		}
-		if containsAny(name, []string{"网页标题", "网页_标题", "title"}) {
-			score += 5
-		}
-		if containsAny(name, []string{"url"}) {
-			score += 4
-		}
-	}
-	if containsAny(strings.ToLower(question), []string{"用户", "user"}) &&
-		containsAny(name, []string{"用户", "user", "customer"}) {
-		score += 5
-	}
-	if containsAny(strings.ToLower(question), []string{"终端", "device", "client"}) &&
-		containsAny(name, []string{"终端", "device", "client"}) {
-		score += 5
-	}
-	if containsAny(strings.ToLower(question), []string{"级别", "level"}) &&
-		containsAny(name, []string{"级别", "level"}) {
-		score += 5
-	}
-	if strings.Contains(name, "url") && !strings.Contains(name, "分类") && intent.Share {
-		score -= 2
 	}
 	return score
 }
@@ -490,17 +421,25 @@ func metricColumnScore(question string, intent queryIntent, column schemaColumn)
 		containsAny(name, []string{"amount", "total", "count", "quantity", "数量", "次数", "金额"}) {
 		score += 8
 	}
-	if containsAny(strings.ToLower(question), []string{"sales", "revenue", "gmv", "成交额", "销售额", "营收"}) &&
-		containsAny(name, []string{"amount", "revenue", "gmv", "sales", "total", "金额", "销售额", "营收"}) {
-		score += 8
-	}
 	if intent.Mode == "detail" && intent.ChartType == "pie" {
 		score -= 2
 	}
-	if containsAny(name, []string{"port", "端口", "id", "编号", "用户组"}) {
+	if isLikelyHighCardinalityIdentifier(column) {
 		score -= 5
 	}
 	return score
+}
+
+func isLikelyHighCardinalityIdentifier(column schemaColumn) bool {
+	name := strings.ToLower(column.Name)
+	if containsAny(name, []string{"category", "class", "group", "type", "分类", "类型", "分组", "级别"}) {
+		return false
+	}
+	return containsAny(name, []string{
+		"id", "编号", "编码", "code", "uuid",
+		"ip", "地址", "address", "url", "链接", "link",
+		"mac", "邮箱", "email", "手机号", "phone", "端口", "port",
+	})
 }
 
 func buildTimeComparisonSQL(tableName, timeColumn, metric, comparisonType, whereClause string) string {

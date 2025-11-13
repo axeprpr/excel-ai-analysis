@@ -12,16 +12,40 @@ import (
 type llmSQLRequest struct {
 	Question       string         `json:"question"`
 	Schema         schemaSnapshot `json:"schema"`
+	SchemaFacts    []llmTableFact `json:"schema_facts,omitempty"`
 	FailedSQL      string         `json:"failed_sql,omitempty"`
 	ExecutionError string         `json:"execution_error,omitempty"`
 	PlanningHints  []string       `json:"planning_hints,omitempty"`
 }
 
 type llmSQLResponse struct {
-	SQL    string `json:"sql"`
-	Mode   string `json:"mode"`
-	Refuse bool   `json:"refuse,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	SQL             string `json:"sql"`
+	Mode            string `json:"mode"`
+	SourceTable     string `json:"source_table,omitempty"`
+	DimensionColumn string `json:"dimension_column,omitempty"`
+	MetricColumn    string `json:"metric_column,omitempty"`
+	TimeColumn      string `json:"time_column,omitempty"`
+	ChartType       string `json:"chart_type,omitempty"`
+	Refuse          bool   `json:"refuse,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+type llmTableFact struct {
+	TableName   string              `json:"table_name"`
+	SourceFile  string              `json:"source_file,omitempty"`
+	SourceSheet string              `json:"source_sheet,omitempty"`
+	RowCount    int                 `json:"row_count"`
+	Columns     []llmColumnFact     `json:"columns"`
+	PreviewRows []map[string]any    `json:"preview_rows,omitempty"`
+}
+
+type llmColumnFact struct {
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Semantic        string   `json:"semantic"`
+	NonNullSamples  []string `json:"non_null_samples,omitempty"`
+	ApproxDistinct  int      `json:"approx_distinct"`
+	EmptyValueCount int      `json:"empty_value_count"`
 }
 
 type openAIChatRequest struct {
@@ -83,9 +107,11 @@ func (h *Handler) generateSQLWithOpenAICompatible(settings modelSettings, req ll
 			{
 				Role: "system",
 				Content: "You generate read-only SQLite SQL for the user's question. " +
-					"Return strict JSON with keys sql, mode, refuse, and reason. " +
+					"Return strict JSON with keys sql, mode, source_table, dimension_column, metric_column, time_column, chart_type, refuse, and reason. " +
 					"Allowed modes are detail, aggregate, topn, trend, count, share, compare, refuse. " +
 					"Only generate a single read-only SELECT or WITH statement for SQLite. " +
+					"Choose the table and columns from the provided schema headers, schema facts, sample values, and lightweight statistics. " +
+					"Do not rely on domain assumptions that are not supported by those facts. " +
 					"Prefer aggregation over raw detail when the user asks for analysis, distribution, summary, counts, or charts. " +
 					"If a detail query could return many rows, add a LIMIT no greater than 200. " +
 					"If the request is ambiguous, unsupported by the schema, or asks for a chart without enough evidence for a valid chart, set refuse=true, provide a short reason, and leave sql empty.",
@@ -147,6 +173,10 @@ func (h *Handler) generateSQLWithOpenAICompatible(settings modelSettings, req ll
 func buildLLMSQLPrompt(req llmSQLRequest) string {
 	schemaJSON, _ := json.Marshal(req.Schema)
 	prompt := "Question:\n" + req.Question + "\n\nSchema:\n" + string(schemaJSON)
+	if len(req.SchemaFacts) > 0 {
+		factsJSON, _ := json.Marshal(req.SchemaFacts)
+		prompt += "\n\nSchema Facts:\n" + string(factsJSON)
+	}
 	if strings.TrimSpace(req.FailedSQL) != "" || strings.TrimSpace(req.ExecutionError) != "" {
 		prompt += "\n\nPrevious SQL Attempt:\n" + req.FailedSQL
 		prompt += "\n\nExecution Error:\n" + req.ExecutionError
