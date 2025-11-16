@@ -278,7 +278,7 @@ func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, databasePat
 		Question:      question,
 		Schema:        snapshot,
 		SchemaFacts:   schemaFacts,
-		PlanningHints: llmPlanningHints(heuristicPlan),
+		PlanningHints: baseLLMPlanningHints(),
 	})
 	if err != nil {
 		llmResp, err = h.generateSQLWithLLM(settings, llmSQLRequest{
@@ -286,7 +286,7 @@ func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, databasePat
 			Schema:      snapshot,
 			SchemaFacts: schemaFacts,
 			PlanningHints: append(
-				llmPlanningHints(heuristicPlan),
+				baseLLMPlanningHints(),
 				"Prefer an aggregated summary when the question asks for analysis or charts.",
 				"Keep detail mode limited to 200 rows.",
 			),
@@ -831,6 +831,14 @@ func llmPlanningHints(plan queryPlan) []string {
 	return hints
 }
 
+func baseLLMPlanningHints() []string {
+	return []string{
+		"Use only the provided schema facts, sample rows, and column statistics when choosing a table or columns.",
+		"If the request is ambiguous, return refuse=true instead of guessing.",
+		"Only choose a chart type when the schema facts support a reliable chart.",
+	}
+}
+
 func queryRefusalReason(databasePath, question string, plan queryPlan) string {
 	if plan.Mode == "refuse" {
 		if strings.TrimSpace(plan.SelectionReason) != "" {
@@ -841,13 +849,20 @@ func queryRefusalReason(databasePath, question string, plan queryPlan) string {
 
 	requestedChart := requestedChartType(question)
 	if requestedChart == "" {
-		return ""
+		return validateChartFeasibility(databasePath, plan)
 	}
 	if questionOnlyAsksForChart(question) {
 		return "The request only asks for a chart type, but does not specify what should be analyzed. Please mention a field, metric, or analysis target."
 	}
+	if plan.ChartType == "" || plan.ChartType == "table" {
+		return "The request asks for a chart, but the model could not determine a reliable chart plan from the schema. Please ask with a specific dimension, metric, or time field."
+	}
 
-	switch requestedChart {
+	return validateChartFeasibility(databasePath, plan)
+}
+
+func validateChartFeasibility(databasePath string, plan queryPlan) string {
+	switch plan.ChartType {
 	case "pie":
 		if plan.ChartType != "pie" || plan.Mode != "share" || strings.TrimSpace(plan.DimensionColumn) == "" {
 			return "A pie chart needs a clear categorical breakdown. Please specify the dimension you want to distribute, such as category, type, or level."
