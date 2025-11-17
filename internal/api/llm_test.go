@@ -226,3 +226,49 @@ func TestBuildQueryPlanWithFallbackUsesLLMSelectedTableAndColumns(t *testing.T) 
 		t.Fatalf("expected llm warning metadata")
 	}
 }
+
+func TestBuildAnalysisQuestionsWithLLM(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(openAIChatResponse{
+			Choices: []struct {
+				Message openAIChatMessage `json:"message"`
+			}{
+				{
+					Message: openAIChatMessage{
+						Role: "assistant",
+						Content: "{\"views\":[{\"title\":\"Distribution\",\"question\":\"按category查看分布饼图\",\"chart_type\":\"pie\"},{\"title\":\"Trend\",\"question\":\"按order_date查看趋势折线图\",\"chart_type\":\"line\"}]}",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	handler := &Handler{}
+	settings := modelSettings{
+		Provider: "openai-compatible",
+		Model:    "Qwen/Qwen3.5-9B",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+	}
+	snapshot := schemaSnapshot{
+		Tables: []tableSchema{
+			{
+				TableName: "orders",
+				Columns: []schemaColumn{
+					{Name: "order_date", Type: "TEXT", Semantic: "time"},
+					{Name: "category", Type: "TEXT", Semantic: "dimension"},
+					{Name: "amount", Type: "REAL", Semantic: "metric"},
+				},
+			},
+		},
+	}
+
+	questions := handler.buildAnalysisQuestionsWithLLM(settings, "", snapshot, "analysis overview")
+	if len(questions) != 2 {
+		t.Fatalf("expected two llm-planned analysis questions, got %v", questions)
+	}
+	if questions[0] != "按category查看分布饼图" {
+		t.Fatalf("unexpected first analysis question: %q", questions[0])
+	}
+}

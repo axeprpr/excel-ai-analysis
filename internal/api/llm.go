@@ -65,6 +65,22 @@ type openAIChatResponse struct {
 	} `json:"choices"`
 }
 
+type llmAnalysisPlanRequest struct {
+	Question    string         `json:"question"`
+	Schema      schemaSnapshot `json:"schema"`
+	SchemaFacts []llmTableFact `json:"schema_facts,omitempty"`
+}
+
+type llmAnalysisPlanResponse struct {
+	Views []struct {
+		Title     string `json:"title"`
+		Question  string `json:"question"`
+		ChartType string `json:"chart_type"`
+	} `json:"views"`
+	Refuse bool   `json:"refuse,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
 func llmEnabled(settings modelSettings) bool {
 	return strings.TrimSpace(settings.Model) != "" &&
 		strings.TrimSpace(settings.BaseURL) != "" &&
@@ -82,6 +98,76 @@ func (h *Handler) generateSQLWithLLM(settings modelSettings, req llmSQLRequest) 
 	default:
 		return llmSQLResponse{}, errors.New("unsupported llm provider")
 	}
+}
+
+func (h *Handler) generateAnalysisPlanWithLLM(settings modelSettings, req llmAnalysisPlanRequest) (llmAnalysisPlanResponse, error) {
+	if !llmEnabled(settings) {
+		return llmAnalysisPlanResponse{}, errors.New("llm settings are incomplete")
+	}
+
+	body, err := json.Marshal(openAIChatRequest{
+		Model: settings.Model,
+		Messages: []openAIChatMessage{
+			{
+				Role: "system",
+				Content: "You create a compact analysis plan for a broad spreadsheet analysis request. " +
+					"Return strict JSON with keys views, refuse, and reason. " +
+					"views must contain 1 to 3 items, each with title, question, and chart_type. " +
+					"Allowed chart_type values are table, bar, line, pie. " +
+					"Use only the provided schema headers, sample rows, and lightweight statistics. " +
+					"Do not inject domain knowledge that is not supported by the schema facts. " +
+					"Prefer clear, generic analysis questions over business-specific narratives. " +
+					"If the request is too ambiguous for a reliable multi-view plan, set refuse=true and explain briefly.",
+			},
+			{
+				Role:    "user",
+				Content: buildLLMAnalysisPlanPrompt(req),
+			},
+		},
+		Temperature: 0,
+	})
+	if err != nil {
+		return llmAnalysisPlanResponse{}, err
+	}
+
+	endpoint := strings.TrimRight(settings.BaseURL, "/") + "/chat/completions"
+	httpReq, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return llmAnalysisPlanResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+settings.APIKey)
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return llmAnalysisPlanResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return llmAnalysisPlanResponse{}, errors.New("llm analysis plan request failed")
+	}
+
+	var parsed openAIChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return llmAnalysisPlanResponse{}, err
+	}
+	if len(parsed.Choices) == 0 {
+		return llmAnalysisPlanResponse{}, errors.New("llm analysis plan response did not contain choices")
+	}
+
+	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var out llmAnalysisPlanResponse
+	if err := json.Unmarshal([]byte(content), &out); err != nil {
+		return llmAnalysisPlanResponse{}, err
+	}
+	return out, nil
 }
 
 func resolveLLMProvider(settings modelSettings) string {
@@ -185,5 +271,16 @@ func buildLLMSQLPrompt(req llmSQLRequest) string {
 	if len(req.PlanningHints) > 0 {
 		prompt += "\n\nPlanning Hints:\n- " + strings.Join(req.PlanningHints, "\n- ")
 	}
+	return prompt
+}
+
+func buildLLMAnalysisPlanPrompt(req llmAnalysisPlanRequest) string {
+	schemaJSON, _ := json.Marshal(req.Schema)
+	prompt := "Broad Analysis Request:\n" + req.Question + "\n\nSchema:\n" + string(schemaJSON)
+	if len(req.SchemaFacts) > 0 {
+		factsJSON, _ := json.Marshal(req.SchemaFacts)
+		prompt += "\n\nSchema Facts:\n" + string(factsJSON)
+	}
+	prompt += "\n\nDesign 1 to 3 generic analysis views that are strongly supported by the schema facts."
 	return prompt
 }

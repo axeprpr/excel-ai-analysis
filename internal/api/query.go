@@ -940,6 +940,11 @@ func shouldBuildAnalysisReport(question string) bool {
 
 func (h *Handler) buildAnalysisReport(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, chartMode string) []map[string]any {
 	questions := buildAnalysisQuestions(snapshot)
+	if llmEnabled(settings) {
+		if planned := h.buildAnalysisQuestionsWithLLM(settings, meta.DatabasePath, snapshot, "analysis overview"); len(planned) > 0 {
+			questions = planned
+		}
+	}
 	report := make([]map[string]any, 0, len(questions))
 	seen := map[string]struct{}{}
 	for _, item := range questions {
@@ -961,6 +966,28 @@ func (h *Handler) buildAnalysisReport(meta sessionMetadata, settings modelSettin
 		}
 	}
 	return report
+}
+
+func (h *Handler) buildAnalysisQuestionsWithLLM(settings modelSettings, databasePath string, snapshot schemaSnapshot, question string) []string {
+	plan, err := h.generateAnalysisPlanWithLLM(settings, llmAnalysisPlanRequest{
+		Question:    question,
+		Schema:      snapshot,
+		SchemaFacts: buildLLMSchemaFacts(databasePath, snapshot),
+	})
+	if err != nil || plan.Refuse {
+		return nil
+	}
+	questions := make([]string, 0, len(plan.Views))
+	for _, view := range plan.Views {
+		if strings.TrimSpace(view.Question) == "" {
+			continue
+		}
+		questions = append(questions, strings.TrimSpace(view.Question))
+		if len(questions) >= 3 {
+			break
+		}
+	}
+	return questions
 }
 
 func buildAnalysisQuestions(snapshot schemaSnapshot) []string {
