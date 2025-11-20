@@ -439,6 +439,7 @@ func isLikelyHighCardinalityIdentifier(column schemaColumn) bool {
 		"id", "编号", "编码", "code", "uuid",
 		"ip", "地址", "address", "url", "链接", "link",
 		"mac", "邮箱", "email", "手机号", "phone", "端口", "port",
+		"title", "标题", "name", "名称",
 	})
 }
 

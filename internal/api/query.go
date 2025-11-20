@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -915,16 +916,20 @@ func validatePieChartFeasibility(databasePath string, plan queryPlan) string {
 	if strings.TrimSpace(plan.SourceTable) == "" || strings.TrimSpace(plan.DimensionColumn) == "" {
 		return "A pie chart needs a categorical dimension, but none was selected reliably."
 	}
-	sql := "SELECT COUNT(DISTINCT " + plan.DimensionColumn + ") AS distinct_count, COUNT(*) AS total_count FROM " + plan.SourceTable + ";"
-	result := executeQueryIfPossible(databasePath, sql, []string{"distinct_count", "total_count"})
+	querySQL := strings.TrimSpace(strings.TrimSuffix(plan.SQL, ";"))
+	if querySQL == "" {
+		return "The service could not verify that the selected field is suitable for a pie chart. Please ask more specifically."
+	}
+	sql := "SELECT COUNT(*) AS category_count FROM (" + querySQL + ") AS pie_source;"
+	result := executeQueryIfPossible(databasePath, sql, []string{"category_count"})
 	if !result.OK || len(result.Rows) == 0 {
 		return "The service could not verify that the selected field is suitable for a pie chart. Please ask more specifically."
 	}
-	distinctCount, _ := readIntValue(result.Rows[0]["distinct_count"])
-	if distinctCount < 2 {
+	categoryCount, _ := readIntValue(result.Rows[0]["category_count"])
+	if categoryCount < 2 {
 		return "The selected field does not have enough categories for a pie chart."
 	}
-	if distinctCount > 12 {
+	if categoryCount > 20 {
 		return "The selected field has too many categories for a reliable pie chart. Please ask for top categories or specify a narrower grouping."
 	}
 	return ""
@@ -954,7 +959,7 @@ func (h *Handler) buildAnalysisReport(meta sessionMetadata, settings modelSettin
 			continue
 		}
 		seen[item] = struct{}{}
-		response, err := h.executeHeuristicSingleQuery(meta, settings, snapshot, item, chartMode)
+		response, err := h.executeSingleQuery(meta, settings, snapshot, item, chartMode)
 		if err != nil {
 			continue
 		}
@@ -1318,6 +1323,12 @@ func firstTimeColumn(table tableSchema) string {
 }
 
 func pickVisualizationX(plan queryPlan, snapshot schemaSnapshot) string {
+	if plan.Mode == "trend" {
+		return "time_bucket"
+	}
+	if plan.Mode == "compare" && slices.Contains(plan.SelectedColumns, "compare_period") {
+		return "compare_period"
+	}
 	if strings.TrimSpace(plan.DimensionColumn) != "" {
 		return plan.DimensionColumn
 	}
