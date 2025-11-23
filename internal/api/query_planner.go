@@ -431,15 +431,7 @@ func metricColumnScore(question string, intent queryIntent, column schemaColumn)
 }
 
 func isLikelyHighCardinalityIdentifier(column schemaColumn) bool {
-	name := strings.ToLower(column.Name)
-	if containsAny(name, []string{"category", "class", "group", "type", "分类", "类型", "分组", "级别"}) {
-		return false
-	}
-	return containsAny(name, []string{
-		"id", "编号", "编码", "code", "uuid",
-		"ip", "地址", "address", "url", "链接", "link",
-		"mac", "邮箱", "email", "手机号", "phone", "端口", "port",
-	})
+	return strings.EqualFold(strings.TrimSpace(column.Semantic), "identifier")
 }
 
 func buildTimeComparisonSQL(tableName, timeColumn, metric, comparisonType, whereClause string) string {
