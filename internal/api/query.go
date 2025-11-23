@@ -946,7 +946,7 @@ func shouldBuildAnalysisReport(question string) bool {
 }
 
 func (h *Handler) buildAnalysisReport(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, question, chartMode string) []map[string]any {
-	questions := buildAnalysisQuestions(snapshot)
+	questions := buildAnalysisQuestions(meta.DatabasePath, snapshot)
 	if llmEnabled(settings) {
 		if planned := h.buildAnalysisQuestionsWithLLM(settings, meta.DatabasePath, snapshot, question); len(planned) > 0 {
 			questions = planned
@@ -997,13 +997,13 @@ func (h *Handler) buildAnalysisQuestionsWithLLM(settings modelSettings, database
 	return questions
 }
 
-func buildAnalysisQuestions(snapshot schemaSnapshot) []string {
+func buildAnalysisQuestions(databasePath string, snapshot schemaSnapshot) []string {
 	if len(snapshot.Tables) == 0 {
 		return nil
 	}
 	table := snapshot.Tables[0]
 	primaryCategory := firstMatchingDimensionColumn(table, []string{"分类", "category", "type", "group", "级别"})
-	secondaryDimension := firstAlternativeAnalysisDimension(table, primaryCategory)
+	secondaryDimension := firstAlternativeAnalysisDimension(databasePath, table, primaryCategory)
 	timeColumn := firstTimeColumn(table)
 
 	questions := make([]string, 0, 4)
@@ -1141,7 +1141,27 @@ func firstMatchingDimensionColumn(table tableSchema, keywords []string) string {
 	return ""
 }
 
-func firstAlternativeAnalysisDimension(table tableSchema, excluded string) string {
+func firstAlternativeAnalysisDimension(databasePath string, table tableSchema, excluded string) string {
+	type candidate struct {
+		name  string
+		score float64
+	}
+	best := candidate{}
+	for _, column := range table.Columns {
+		if column.Name == excluded || isMetricColumn(column) || isTimeColumn(column) || isLikelyHighCardinalityIdentifier(column) {
+			continue
+		}
+		score := dimensionCardinalityScore(databasePath, table.TableName, column.Name)
+		if score <= 0 {
+			continue
+		}
+		if best.name == "" || score < best.score {
+			best = candidate{name: column.Name, score: score}
+		}
+	}
+	if best.name != "" {
+		return best.name
+	}
 	for _, column := range table.Columns {
 		if column.Name == excluded || isMetricColumn(column) || isTimeColumn(column) || isLikelyHighCardinalityIdentifier(column) {
 			continue
@@ -1149,6 +1169,23 @@ func firstAlternativeAnalysisDimension(table tableSchema, excluded string) strin
 		return column.Name
 	}
 	return ""
+}
+
+func dimensionCardinalityScore(databasePath, tableName, columnName string) float64 {
+	if databasePath == "" || tableName == "" || columnName == "" {
+		return 0
+	}
+	sql := "SELECT COUNT(*) AS total_count, COUNT(DISTINCT " + columnName + ") AS distinct_count FROM " + tableName + ";"
+	result := executeQueryIfPossible(databasePath, sql, []string{"total_count", "distinct_count"})
+	if !result.OK || len(result.Rows) == 0 {
+		return 0
+	}
+	totalCount, _ := readIntValue(result.Rows[0]["total_count"])
+	distinctCount, _ := readIntValue(result.Rows[0]["distinct_count"])
+	if totalCount <= 0 || distinctCount <= 1 {
+		return 0
+	}
+	return float64(distinctCount) / float64(totalCount)
 }
 
 func buildQueryPlan(snapshot schemaSnapshot, question string) queryPlan {
