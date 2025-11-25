@@ -45,3 +45,44 @@ func TestShouldNotRetryForNonRepairableErrors(t *testing.T) {
 		t.Fatalf("expected llm repair retry to stay disabled for non-repairable errors")
 	}
 }
+
+func TestQueryResultQualityIssueForDegenerateGroupedResult(t *testing.T) {
+	plan := queryPlan{Mode: "compare"}
+	rows := make([]map[string]any, 0, 20)
+	for i := 0; i < 19; i++ {
+		rows = append(rows, map[string]any{"total_value": 1})
+	}
+	rows = append(rows, map[string]any{"total_value": 2})
+
+	issue := queryResultQualityIssue(plan, queryExecutionResult{
+		OK:   true,
+		Rows: rows,
+	})
+	if issue == "" {
+		t.Fatalf("expected low-quality issue for mostly unit grouped values")
+	}
+}
+
+func TestQueryResultQualityIssueForHealthyGroupedResult(t *testing.T) {
+	plan := queryPlan{Mode: "compare"}
+	rows := []map[string]any{
+		{"total_value": 30},
+		{"total_value": 24},
+		{"total_value": 19},
+		{"total_value": 16},
+		{"total_value": 12},
+		{"total_value": 10},
+		{"total_value": 8},
+		{"total_value": 7},
+		{"total_value": 5},
+		{"total_value": 4},
+	}
+
+	issue := queryResultQualityIssue(plan, queryExecutionResult{
+		OK:   true,
+		Rows: rows,
+	})
+	if issue != "" {
+		t.Fatalf("expected no low-quality issue for healthy grouped values, got: %s", issue)
+	}
+}

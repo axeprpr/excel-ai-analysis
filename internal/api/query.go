@@ -54,6 +54,7 @@ type queryExecutionResult struct {
 }
 
 const maxDetailRows = 200
+const maxQueryRepairAttempts = 3
 
 func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -153,25 +154,49 @@ func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettin
 		return buildRefusalResponse(meta.SessionID, question, chartMode, plan, plannerWarnings, refusalReason), nil
 	}
 
-	execResult := executePlanQuery(meta.DatabasePath, plan)
-	if shouldRetryLLMRepair(plannerWarnings, execResult) {
-		repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, question, plan, execResult)
-		plannerWarnings = append(plannerWarnings, llmRepairWarnings...)
+	execResult := queryExecutionResult{}
+	for attempt := 1; attempt <= maxQueryRepairAttempts; attempt++ {
+		execResult = executePlanQuery(meta.DatabasePath, plan)
+		if shouldRetryLLMRepair(plannerWarnings, execResult) {
+			repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, question, plan, execResult)
+			plannerWarnings = append(plannerWarnings, llmRepairWarnings...)
+			if repaired {
+				plan = repairedPlan
+				continue
+			}
+		}
+
+		if shouldRetryWithHeuristicPlan(plannerWarnings, execResult) {
+			repairedPlan, heuristicWarnings := h.buildHeuristicQueryPlan(settings, snapshot, question)
+			repairedResult := executePlanQuery(meta.DatabasePath, repairedPlan)
+			if repairedResult.OK {
+				plan = repairedPlan
+				execResult = repairedResult
+				plannerWarnings = append(plannerWarnings, heuristicWarnings...)
+				plannerWarnings = append(plannerWarnings, "LLM SQL execution failed; the service repaired the query by falling back to the heuristic planner.")
+				continue
+			}
+		}
+
+		qualityIssue := queryResultQualityIssue(plan, execResult)
+		if qualityIssue == "" {
+			break
+		}
+		plannerWarnings = append(plannerWarnings, "Detected a low-quality query result: "+qualityIssue)
+		if attempt >= maxQueryRepairAttempts {
+			plannerWarnings = append(plannerWarnings, "Reached maximum query repair attempts; please refine the question with a clearer dimension or metric.")
+			break
+		}
+
+		repairedPlan, qualityWarnings, repaired := h.repairQueryPlanForQualityWithLLM(settings, snapshot, question, plan, qualityIssue)
+		plannerWarnings = append(plannerWarnings, qualityWarnings...)
 		if repaired {
 			plan = repairedPlan
-			execResult = executePlanQuery(meta.DatabasePath, plan)
+			continue
 		}
+		break
 	}
-	if shouldRetryWithHeuristicPlan(plannerWarnings, execResult) {
-		repairedPlan, heuristicWarnings := h.buildHeuristicQueryPlan(settings, snapshot, question)
-		repairedResult := executePlanQuery(meta.DatabasePath, repairedPlan)
-		if repairedResult.OK {
-			plan = repairedPlan
-			execResult = repairedResult
-			plannerWarnings = append(plannerWarnings, heuristicWarnings...)
-			plannerWarnings = append(plannerWarnings, "LLM SQL execution failed; the service repaired the query by falling back to the heuristic planner.")
-		}
-	}
+
 	if refusalReason := queryRefusalReason(meta.DatabasePath, question, plan); refusalReason != "" {
 		return buildRefusalResponse(meta.SessionID, question, chartMode, plan, plannerWarnings, refusalReason), nil
 	}
@@ -263,6 +288,76 @@ func (h *Handler) repairQueryPlanWithLLM(settings modelSettings, snapshot schema
 	}
 	repairedPlan.SelectionReason = "repaired by the configured LLM provider after a SQLite execution error"
 	return repairedPlan, []string{"LLM repaired the SQL after an execution error."}, true
+}
+
+func (h *Handler) repairQueryPlanForQualityWithLLM(settings modelSettings, snapshot schemaSnapshot, question string, failedPlan queryPlan, qualityIssue string) (queryPlan, []string, bool) {
+	if !llmEnabled(settings) {
+		return failedPlan, nil, false
+	}
+
+	llmResp, err := h.generateSQLWithLLM(settings, llmSQLRequest{
+		Question:       question,
+		Schema:         snapshot,
+		FailedSQL:      failedPlan.SQL,
+		ExecutionError: "low quality result: " + qualityIssue,
+		PlanningHints: append(
+			baseLLMPlanningHints(),
+			"If the grouped result is degenerate (for example many groups with value 1), choose a lower-cardinality categorical dimension.",
+			"Prefer dimensions with meaningful aggregation rather than near-unique identifiers.",
+			"Keep detail mode limited to 200 rows.",
+		),
+	})
+	if err != nil {
+		return failedPlan, []string{"LLM could not replan the query after detecting a low-quality result."}, false
+	}
+	if llmResp.Refuse {
+		repairedPlan := failedPlan
+		repairedPlan.Mode = "refuse"
+		repairedPlan.SQL = ""
+		repairedPlan.SelectionReason = strings.TrimSpace(llmResp.Reason)
+		return repairedPlan, []string{"LLM declined to continue after detecting low-quality results."}, true
+	}
+	safeSQL, validationErr := sanitizeReadOnlySQL(llmResp.SQL)
+	if validationErr != nil {
+		return failedPlan, []string{"LLM replan returned an unsafe or unsupported SQL statement."}, false
+	}
+
+	table := chooseLLMSourceTable(snapshot, llmResp)
+	mode := normalizeIntentMode(llmResp.Mode)
+	if mode == "" {
+		mode = inferModeFromSQL(safeSQL)
+		if mode == "" {
+			mode = failedPlan.Mode
+		}
+	}
+	chartType := normalizeLLMChartType(llmResp.ChartType)
+	if chartType == "" {
+		chartType = failedPlan.ChartType
+	}
+	dimensionColumn := chooseLLMColumn(llmResp.DimensionColumn, table, func(column schemaColumn) bool {
+		return !isMetricColumn(column) && !isTimeColumn(column)
+	}, failedPlan.DimensionColumn)
+	metricColumn := chooseLLMColumn(llmResp.MetricColumn, table, isMetricColumn, failedPlan.MetricColumn)
+	timeColumn := chooseLLMColumn(llmResp.TimeColumn, table, isTimeColumn, failedPlan.TimeColumn)
+
+	repairedPlan := failedPlan
+	repairedPlan.SourceTable = table.TableName
+	repairedPlan.SourceFile = table.SourceFile
+	repairedPlan.SourceSheet = table.SourceSheet
+	repairedPlan.CandidateTables = []string{table.TableName}
+	repairedPlan.PlanningConfidence = 1
+	repairedPlan.SelectionReason = "replanned by the configured LLM provider after detecting low-quality grouped results"
+	repairedPlan.DimensionColumn = dimensionColumn
+	repairedPlan.MetricColumn = metricColumn
+	repairedPlan.TimeColumn = timeColumn
+	repairedPlan.SelectedColumns = selectedColumnsForPlan(mode, dimensionColumn, metricColumn, timeColumn)
+	repairedPlan.ChartType = chartType
+	repairedPlan.Mode = mode
+	repairedPlan.SQL = safeSQL
+	repairedPlan.Filters = []string{}
+	repairedPlan.PlannedFilters = nil
+
+	return repairedPlan, []string{"LLM replanned the query after detecting low-quality grouped results."}, true
 }
 
 func (h *Handler) buildQueryPlanWithFallback(settings modelSettings, databasePath string, snapshot schemaSnapshot, question string) (queryPlan, []string) {
@@ -809,6 +904,50 @@ func llmWasUsed(plannerWarnings []string) bool {
 		}
 	}
 	return false
+}
+
+func queryResultQualityIssue(plan queryPlan, result queryExecutionResult) string {
+	if !result.OK || len(result.Rows) == 0 {
+		return ""
+	}
+	if plan.Mode != "compare" && plan.Mode != "topn" && plan.Mode != "share" {
+		return ""
+	}
+	if len(result.Rows) < 10 {
+		return ""
+	}
+	if looksLikeDegenerateGroupCounts(result.Rows) {
+		return "grouped results are near-degenerate (most groups evaluate to 1), likely due to a high-cardinality dimension"
+	}
+	return ""
+}
+
+func looksLikeDegenerateGroupCounts(rows []map[string]any) bool {
+	unitValueRows := 0
+	measuredRows := 0
+	for _, row := range rows {
+		value, ok := extractPrimaryAggregateValue(row)
+		if !ok {
+			continue
+		}
+		measuredRows++
+		if value == 1 {
+			unitValueRows++
+		}
+	}
+	if measuredRows < 10 {
+		return false
+	}
+	return float64(unitValueRows)/float64(measuredRows) >= 0.8
+}
+
+func extractPrimaryAggregateValue(row map[string]any) (int, bool) {
+	for _, key := range []string{"total_value", "total_count"} {
+		if value, ok := readIntValue(row[key]); ok {
+			return value, true
+		}
+	}
+	return 0, false
 }
 
 func llmPlanningHints(plan queryPlan) []string {
