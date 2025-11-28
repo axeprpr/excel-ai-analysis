@@ -155,12 +155,27 @@ func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettin
 	}
 
 	execResult := queryExecutionResult{}
+	repairTrace := make([]map[string]any, 0, maxQueryRepairAttempts)
 	for attempt := 1; attempt <= maxQueryRepairAttempts; attempt++ {
 		execResult = executePlanQuery(meta.DatabasePath, plan)
+		attemptTrace := map[string]any{
+			"attempt":  attempt,
+			"mode":     plan.Mode,
+			"sql":      plan.SQL,
+			"ok":       execResult.OK,
+			"row_count": effectiveRowCount(execResult, len(execResult.Rows)),
+		}
+		if execResult.Error != "" {
+			attemptTrace["error"] = execResult.Error
+		}
 		if shouldRetryLLMRepair(plannerWarnings, execResult) {
 			repairedPlan, llmRepairWarnings, repaired := h.repairQueryPlanWithLLM(settings, snapshot, question, plan, execResult)
 			plannerWarnings = append(plannerWarnings, llmRepairWarnings...)
 			if repaired {
+				attemptTrace["reason"] = "repairable_sql_error"
+				attemptTrace["action"] = "llm_repair_sql"
+				attemptTrace["outcome"] = "retry"
+				repairTrace = append(repairTrace, attemptTrace)
 				plan = repairedPlan
 				continue
 			}
@@ -174,26 +189,49 @@ func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettin
 				execResult = repairedResult
 				plannerWarnings = append(plannerWarnings, heuristicWarnings...)
 				plannerWarnings = append(plannerWarnings, "LLM SQL execution failed; the service repaired the query by falling back to the heuristic planner.")
+				attemptTrace["reason"] = "llm_sql_error_fallback"
+				attemptTrace["action"] = "heuristic_replan"
+				attemptTrace["outcome"] = "retry"
+				repairTrace = append(repairTrace, attemptTrace)
 				continue
 			}
 		}
 
 		qualityIssue := queryResultQualityIssue(plan, execResult)
 		if qualityIssue == "" {
+			attemptTrace["outcome"] = "accepted"
+			repairTrace = append(repairTrace, attemptTrace)
 			break
 		}
+		attemptTrace["reason"] = qualityIssue
 		plannerWarnings = append(plannerWarnings, "Detected a low-quality query result: "+qualityIssue)
 		if attempt >= maxQueryRepairAttempts {
 			plannerWarnings = append(plannerWarnings, "Reached maximum query repair attempts; please refine the question with a clearer dimension or metric.")
+			attemptTrace["outcome"] = "stopped"
+			repairTrace = append(repairTrace, attemptTrace)
 			break
 		}
 
 		repairedPlan, qualityWarnings, repaired := h.repairQueryPlanForQualityWithLLM(settings, snapshot, question, plan, qualityIssue)
 		plannerWarnings = append(plannerWarnings, qualityWarnings...)
 		if repaired {
+			attemptTrace["action"] = "llm_replan_quality"
+			attemptTrace["outcome"] = "retry"
+			repairTrace = append(repairTrace, attemptTrace)
 			plan = repairedPlan
 			continue
 		}
+		fallbackPlan, fallbackWarnings, fallbackRepaired := repairQueryPlanForQualityWithData(meta.DatabasePath, snapshot, plan)
+		plannerWarnings = append(plannerWarnings, fallbackWarnings...)
+		if fallbackRepaired {
+			attemptTrace["action"] = "data_driven_replan_quality"
+			attemptTrace["outcome"] = "retry"
+			repairTrace = append(repairTrace, attemptTrace)
+			plan = fallbackPlan
+			continue
+		}
+		attemptTrace["outcome"] = "stopped"
+		repairTrace = append(repairTrace, attemptTrace)
 		break
 	}
 
@@ -229,6 +267,7 @@ func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettin
 		"chart_mode":    chartMode,
 		"summary":       buildQuerySummary(plan, executed, effectiveRowCount(execResult, len(rows))),
 		"query_plan":    plan,
+		"repair_trace":  repairTrace,
 		"visualization": visualization,
 		"chart":         buildChartOutput(chartMode, settings, plan, visualization, columns, rows),
 		"warnings":      append(plannerWarnings, queryWarnings(plan, execResult)...),
@@ -910,6 +949,9 @@ func queryResultQualityIssue(plan queryPlan, result queryExecutionResult) string
 	if !result.OK || len(result.Rows) == 0 {
 		return ""
 	}
+	if plan.Mode == "trend" && strings.TrimSpace(plan.TimeColumn) != "" && len(result.Rows) <= 1 {
+		return "trend query returned only one time bucket"
+	}
 	if plan.Mode != "compare" && plan.Mode != "topn" && plan.Mode != "share" {
 		return ""
 	}
@@ -948,6 +990,104 @@ func extractPrimaryAggregateValue(row map[string]any) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func repairQueryPlanForQualityWithData(databasePath string, snapshot schemaSnapshot, failedPlan queryPlan) (queryPlan, []string, bool) {
+	if failedPlan.SourceTable == "" {
+		return failedPlan, nil, false
+	}
+	table := findTableByName(snapshot, failedPlan.SourceTable)
+	if table.TableName == "" {
+		return failedPlan, nil, false
+	}
+	newDimension, ratio := chooseLowerCardinalityDimension(databasePath, table, failedPlan.DimensionColumn)
+	if newDimension == "" || newDimension == failedPlan.DimensionColumn {
+		return failedPlan, nil, false
+	}
+
+	whereClause := buildWhereClause(failedPlan.PlannedFilters)
+	newSQL := rebuildGroupedSQLForDimension(failedPlan, newDimension, whereClause)
+	if newSQL == "" {
+		return failedPlan, nil, false
+	}
+
+	repaired := failedPlan
+	repaired.DimensionColumn = newDimension
+	repaired.SelectedColumns = selectedColumnsForPlan(repaired.Mode, repaired.DimensionColumn, repaired.MetricColumn, repaired.TimeColumn)
+	repaired.SQL = newSQL
+	repaired.SelectionReason = "replanned with a lower-cardinality dimension selected from imported data statistics"
+	if repaired.PlanningConfidence < 0.6 {
+		repaired.PlanningConfidence = 0.6
+	}
+	warning := "Applied data-driven replan to avoid high-cardinality grouping; switched dimension to " + newDimension + " (distinct ratio " + fmt.Sprintf("%.4f", ratio) + ")."
+	return repaired, []string{warning}, true
+}
+
+func chooseLowerCardinalityDimension(databasePath string, table tableSchema, excluded string) (string, float64) {
+	type candidate struct {
+		name  string
+		ratio float64
+	}
+	bestPreferred := candidate{}
+	bestFallback := candidate{}
+	for _, column := range table.Columns {
+		if column.Name == excluded || isMetricColumn(column) || isTimeColumn(column) {
+			continue
+		}
+		ratio := dimensionCardinalityScore(databasePath, table.TableName, column.Name)
+		if ratio <= 0 {
+			continue
+		}
+		if ratio < 0.2 && (bestPreferred.name == "" || ratio < bestPreferred.ratio) {
+			bestPreferred = candidate{name: column.Name, ratio: ratio}
+		}
+		if ratio < 0.8 && (bestFallback.name == "" || ratio < bestFallback.ratio) {
+			bestFallback = candidate{name: column.Name, ratio: ratio}
+		}
+	}
+	if bestPreferred.name != "" {
+		return bestPreferred.name, bestPreferred.ratio
+	}
+	if bestFallback.name != "" {
+		return bestFallback.name, bestFallback.ratio
+	}
+	return "", 0
+}
+
+func rebuildGroupedSQLForDimension(plan queryPlan, dimension, whereClause string) string {
+	switch plan.Mode {
+	case "compare":
+		if plan.MetricColumn != "" {
+			return "SELECT " + dimension + ", SUM(" + plan.MetricColumn + ") AS total_value FROM " + plan.SourceTable +
+				whereClause + " GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 20;"
+		}
+		return "SELECT " + dimension + ", COUNT(*) AS total_value FROM " + plan.SourceTable +
+			whereClause + " GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 20;"
+	case "topn":
+		if plan.MetricColumn != "" {
+			return "SELECT " + dimension + ", SUM(" + plan.MetricColumn + ") AS total_value FROM " + plan.SourceTable +
+				whereClause + " GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 10;"
+		}
+		return "SELECT " + dimension + ", COUNT(*) AS total_value FROM " + plan.SourceTable +
+			whereClause + " GROUP BY " + dimension + " ORDER BY total_value DESC LIMIT 10;"
+	case "share":
+		if plan.MetricColumn != "" {
+			return "SELECT " + dimension + ", ROUND(100.0 * SUM(" + plan.MetricColumn + ") / SUM(SUM(" + plan.MetricColumn + ")) OVER (), 2) AS share_value FROM " + plan.SourceTable +
+				whereClause + " GROUP BY " + dimension + " ORDER BY share_value DESC LIMIT 20;"
+		}
+		return "SELECT " + dimension + ", COUNT(*) AS total_count, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS share_value FROM " + plan.SourceTable +
+			whereClause + " GROUP BY " + dimension + " ORDER BY total_count DESC LIMIT 20;"
+	case "trend":
+		if strings.TrimSpace(plan.TimeColumn) == "" {
+			return ""
+		}
+		if plan.MetricColumn != "" {
+			return buildTrendSQL(plan.SourceTable, plan.TimeColumn, plan.MetricColumn, "day", whereClause)
+		}
+		return buildTrendCountSQL(plan.SourceTable, plan.TimeColumn, "day", whereClause)
+	default:
+		return ""
+	}
 }
 
 func llmPlanningHints(plan queryPlan) []string {
