@@ -1000,12 +1000,33 @@ func repairQueryPlanForQualityWithData(databasePath string, snapshot schemaSnaps
 	if table.TableName == "" {
 		return failedPlan, nil, false
 	}
+	whereClause := buildWhereClause(failedPlan.PlannedFilters)
+	if failedPlan.Mode == "trend" {
+		if strings.TrimSpace(failedPlan.TimeColumn) == "" {
+			return failedPlan, nil, false
+		}
+		daySQL := buildTrendCountSQL(failedPlan.SourceTable, failedPlan.TimeColumn, "day", whereClause)
+		if failedPlan.MetricColumn != "" {
+			daySQL = buildTrendSQL(failedPlan.SourceTable, failedPlan.TimeColumn, failedPlan.MetricColumn, "day", whereClause)
+		}
+		if strings.EqualFold(strings.TrimSpace(strings.TrimSuffix(failedPlan.SQL, ";")), strings.TrimSpace(strings.TrimSuffix(daySQL, ";"))) {
+			return failedPlan, nil, false
+		}
+		repaired := failedPlan
+		repaired.SQL = daySQL
+		repaired.SelectedColumns = selectedColumnsForPlan(repaired.Mode, repaired.DimensionColumn, repaired.MetricColumn, repaired.TimeColumn)
+		repaired.SelectionReason = "replanned by refining trend time granularity from month to day based on data distribution"
+		if repaired.PlanningConfidence < 0.6 {
+			repaired.PlanningConfidence = 0.6
+		}
+		return repaired, []string{"Applied data-driven trend replan to refine time granularity from month to day."}, true
+	}
+
 	newDimension, ratio := chooseLowerCardinalityDimension(databasePath, table, failedPlan.DimensionColumn)
 	if newDimension == "" || newDimension == failedPlan.DimensionColumn {
 		return failedPlan, nil, false
 	}
 
-	whereClause := buildWhereClause(failedPlan.PlannedFilters)
 	newSQL := rebuildGroupedSQLForDimension(failedPlan, newDimension, whereClause)
 	if newSQL == "" {
 		return failedPlan, nil, false
