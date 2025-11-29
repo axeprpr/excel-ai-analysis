@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -81,8 +82,14 @@ func TestRootAndHealthRoutes(t *testing.T) {
 	consoleReq := httptest.NewRequest(http.MethodGet, "/console", nil)
 	consoleRec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(consoleRec, consoleReq)
-	if consoleRec.Code != http.StatusGone {
-		t.Fatalf("expected status %d, got %d", http.StatusGone, consoleRec.Code)
+	if consoleRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, consoleRec.Code)
+	}
+	if got := consoleRec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html;") {
+		t.Fatalf("expected html content-type, got %q", got)
+	}
+	if len(consoleRec.Body.Bytes()) == 0 {
+		t.Fatalf("expected console html body")
 	}
 
 	openAPIReq := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)

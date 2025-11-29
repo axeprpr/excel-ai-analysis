@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/axeprpr/excel-ai-analysis/internal/api"
 )
+
+//go:embed web/console.html
+var consoleHTML []byte
 
 type healthResponse struct {
 	Service string `json:"service"`
@@ -73,11 +77,14 @@ func newServer(addr, dataDir, version string) *http.Server {
 			},
 			"routes": []string{
 				"GET /",
+				"GET /console",
 				"GET /openapi.json",
 				"GET /healthz",
 				"GET /readyz",
 				"GET /api/settings/model",
 				"PUT /api/settings/model",
+				"POST /api/chat/upload",
+				"POST /api/chat/query",
 				"GET /api/status",
 				"GET /api/sessions",
 				"POST /api/sessions",
@@ -105,7 +112,9 @@ func newServer(addr, dataDir, version string) *http.Server {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		http.Error(w, "legacy /console has been retired; use the chat frontend instead", http.StatusGone)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(consoleHTML)
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
