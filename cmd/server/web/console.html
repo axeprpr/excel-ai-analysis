@@ -155,6 +155,41 @@
         bottom: 16px;
         margin-top: 16px;
       }
+      .modal-mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(17, 24, 39, 0.45);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 30;
+      }
+      .modal-mask.open {
+        display: flex;
+      }
+      .modal {
+        width: min(760px, calc(100vw - 32px));
+        max-height: calc(100vh - 32px);
+        overflow: auto;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: 0 24px 60px rgba(17, 24, 39, 0.24);
+      }
+      .modal-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .modal-head h2 {
+        margin: 0;
+      }
+      .modal-close {
+        background: #ede2d2;
+        color: var(--ink);
+      }
       @media (max-width: 960px) {
         .hero, .two-col, .grid { grid-template-columns: 1fr; }
       }
@@ -166,7 +201,10 @@
         <div class="card">
           <h1>Excel AI Analysis</h1>
           <p class="muted">本地会话式 Excel 问数控制台。支持模型配置、文件上传、自然语言提问，以及 `data` / `mermaid` / `mcp` 三种图表输出模式。</p>
-          <div class="toolbar" id="statusPills"></div>
+          <div class="toolbar">
+            <button class="secondary" id="openSettingsBtn">设置</button>
+            <div id="statusPills"></div>
+          </div>
         </div>
         <div class="card stack">
           <h2>全局状态</h2>
@@ -175,26 +213,6 @@
       </section>
 
       <section class="grid">
-        <div class="card stack">
-          <h2>模型配置</h2>
-          <div class="field"><label>Provider</label><input id="provider" placeholder="openai / openrouter / local" /></div>
-          <div class="field"><label>Model</label><input id="model" placeholder="gpt-5.1 / qwen / deepseek" /></div>
-          <div class="field"><label>Base URL</label><input id="baseUrl" placeholder="https://api.openai.com/v1" /></div>
-          <div class="field"><label>API Key</label><input id="apiKey" placeholder="sk-..." /></div>
-          <div class="field"><label>默认图表模式</label>
-            <select id="defaultChartMode">
-              <option value="data">data</option>
-              <option value="mermaid">mermaid</option>
-              <option value="mcp">mcp</option>
-            </select>
-          </div>
-          <div class="field"><label>MCP Server URL</label><input id="mcpServerUrl" placeholder="http://chart-mcp:1122/mcp" /></div>
-          <div class="toolbar">
-            <button id="saveSettingsBtn">保存配置</button>
-            <button class="secondary" id="reloadSettingsBtn">重新加载</button>
-          </div>
-        </div>
-
         <div class="card stack">
           <h2>当前会话操作</h2>
           <div class="toolbar">
@@ -237,6 +255,33 @@
         </div>
       </section>
 
+      <div class="modal-mask" id="settingsModal">
+        <div class="modal">
+          <div class="modal-head">
+            <h2>模型设置</h2>
+            <button class="modal-close" id="closeSettingsBtn">关闭</button>
+          </div>
+          <div class="stack">
+            <div class="field"><label>Provider</label><input id="provider" placeholder="openai / openrouter / local" /></div>
+            <div class="field"><label>Model</label><input id="model" placeholder="gpt-5.1 / qwen / deepseek" /></div>
+            <div class="field"><label>Base URL</label><input id="baseUrl" placeholder="https://api.openai.com/v1" /></div>
+            <div class="field"><label>API Key</label><input id="apiKey" placeholder="sk-..." /></div>
+            <div class="field"><label>默认图表模式</label>
+              <select id="defaultChartMode">
+                <option value="data">data</option>
+                <option value="mermaid">mermaid</option>
+                <option value="mcp">mcp</option>
+              </select>
+            </div>
+            <div class="field"><label>MCP Server URL</label><input id="mcpServerUrl" placeholder="http://chart-mcp:1122/mcp" /></div>
+            <div class="toolbar">
+              <button id="saveSettingsBtn">保存配置</button>
+              <button class="secondary" id="reloadSettingsBtn">重新加载</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="status card muted" id="statusBar">准备就绪</div>
     </div>
 
@@ -264,6 +309,14 @@
 
       function setStatus(text) {
         el("statusBar").textContent = text;
+      }
+
+      function openSettingsModal() {
+        el("settingsModal").classList.add("open");
+      }
+
+      function closeSettingsModal() {
+        el("settingsModal").classList.remove("open");
       }
 
       function renderStatusPills(status) {
@@ -485,6 +538,11 @@
       });
       el("reloadSettingsBtn").addEventListener("click", async () => {
         try { await loadSettings(); setStatus("模型配置已刷新"); } catch (err) { setStatus(err.message); }
+      });
+      el("openSettingsBtn").addEventListener("click", () => openSettingsModal());
+      el("closeSettingsBtn").addEventListener("click", () => closeSettingsModal());
+      el("settingsModal").addEventListener("click", (evt) => {
+        if (evt.target === el("settingsModal")) closeSettingsModal();
       });
       el("createSessionBtn").addEventListener("click", async () => {
         try { await createSession(); } catch (err) { setStatus(err.message); }
