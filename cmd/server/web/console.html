@@ -4,8 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Excel AI Analysis Console</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+      .wrap {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      input, select, textarea, button {
+        font: inherit;
+      }
+      textarea {
+        width: 100%;
+      }
+      pre {
+        overflow: auto;
+      }
+    </style>
   </head>
   <body>
+    <div class="wrap">
     <h1>Excel AI Analysis Console</h1>
 
     <p>
@@ -316,5 +336,6 @@
 
       boot().catch((err) => setStatus(err.message));
     </script>
+    </div>
   </body>
 </html>
