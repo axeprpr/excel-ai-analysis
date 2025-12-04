@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -12,9 +11,6 @@ import (
 
 	"github.com/axeprpr/excel-ai-analysis/internal/api"
 )
-
-//go:embed web/console.html
-var consoleHTML []byte
 
 type healthResponse struct {
 	Service string `json:"service"`
@@ -77,10 +73,10 @@ func newServer(addr, dataDir, version string) *http.Server {
 			},
 			"routes": []string{
 				"GET /",
-				"GET /console",
 				"GET /openapi.json",
 				"GET /healthz",
 				"GET /readyz",
+				"POST /v1/chat/completions",
 				"GET /api/settings/model",
 				"PUT /api/settings/model",
 				"POST /api/chat/upload",
@@ -108,13 +104,7 @@ func newServer(addr, dataDir, version string) *http.Server {
 		_ = json.NewEncoder(w).Encode(api.OpenAPISpec())
 	})
 	mux.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(consoleHTML)
+		http.Error(w, "frontend console has been removed; use OpenAI-compatible /v1/chat/completions", http.StatusGone)
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -137,7 +127,7 @@ func newServer(addr, dataDir, version string) *http.Server {
 
 		status := "ok"
 		checks := map[string]string{
-			"sqlite3": "ok",
+			"sqlite3":  "ok",
 			"data_dir": "ok",
 		}
 
@@ -167,6 +157,7 @@ func newServer(addr, dataDir, version string) *http.Server {
 		})
 	})
 	mux.Handle("/api/", api.NewHandler(dataDir))
+	mux.Handle("/v1/", api.NewHandler(dataDir))
 
 	return &http.Server{
 		Addr:              addr,
