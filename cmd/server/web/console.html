@@ -5,141 +5,227 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Excel AI Analysis Console</title>
     <style>
+      :root {
+        --bg: #f5f6f8;
+        --panel: #ffffff;
+        --border: #d8dde6;
+        --text: #111827;
+        --muted: #6b7280;
+      }
+      * { box-sizing: border-box; }
       body {
         margin: 0;
-        padding: 24px;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--text);
+        background: var(--bg);
       }
       .wrap {
-        max-width: 960px;
-        margin: 0 auto;
+        max-width: 980px;
+        margin: 24px auto;
+        padding: 0 12px;
       }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      label { color: var(--muted); }
       input, select, textarea, button {
         font: inherit;
       }
+      button {
+        height: 34px;
+        min-width: 88px;
+        border: 1px solid var(--border);
+        background: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+      }
       textarea {
         width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
       }
       pre {
+        margin: 0;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #f9fafb;
         overflow: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        border: 1px solid var(--border);
+        padding: 6px;
+        text-align: left;
+        font-size: 13px;
+      }
+      .section-title {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+      #chartBox img {
+        max-width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .json .key { color: #a855f7; }
+      .json .string { color: #16a34a; }
+      .json .number { color: #2563eb; }
+      .json .boolean { color: #dc2626; }
+      .json .null { color: #9ca3af; }
+      dialog {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        max-width: 720px;
+        width: calc(100vw - 24px);
+      }
+      .muted {
+        color: var(--muted);
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-    <h1>Excel AI Analysis Console</h1>
+      <div class="topbar">
+        <h1>Excel AI Analysis</h1>
+        <button id="openSettingsBtn" type="button">设置</button>
+      </div>
 
-    <p>
-      <button id="openSettingsBtn" type="button">设置</button>
-      <button id="refreshSessionsBtn" type="button">刷新 Session</button>
-      <button id="refreshStatusBtn" type="button">刷新状态</button>
-    </p>
+      <div class="panel">
+        <p class="muted" id="statusText">准备就绪</p>
+      </div>
 
-    <p id="statusText">准备就绪</p>
-    <pre id="globalStatus">等待状态...</pre>
+      <div class="panel">
+        <h2 class="section-title">问答</h2>
+        <div class="row" style="margin-bottom:8px;">
+          <label for="sessionSelect">Session</label>
+          <select id="sessionSelect">
+            <option value="">自动创建（上传时）</option>
+          </select>
+          <button id="sessionDetailBtn" type="button">详情</button>
+          <button id="refreshSessionsBtn" type="button">刷新</button>
+        </div>
 
-    <hr />
-
-    <h2>会话</h2>
-    <label for="sessionSelect">Session:</label>
-    <select id="sessionSelect">
-      <option value="">自动创建（上传时）</option>
-    </select>
-    <pre id="sessionInfo">未选择 Session</pre>
-
-    <hr />
-
-    <h2>对话</h2>
-    <p>
-      <label for="chartMode">chart_mode:</label>
-      <select id="chartMode">
-        <option value="data">data</option>
-        <option value="mermaid">mermaid</option>
-        <option value="mcp">mcp</option>
-      </select>
-    </p>
-    <p>
-      <label for="fileInput">文件（可选，上传会自动创建/复用 Session）:</label><br />
-      <input id="fileInput" type="file" multiple />
-    </p>
-    <p>
-      <label for="questionInput">问题:</label><br />
-      <textarea id="questionInput" rows="6" cols="100" placeholder="例如：帮我做上网行为分析"></textarea>
-    </p>
-    <p>
-      <button id="sendBtn" type="button">发送</button>
-    </p>
-
-    <h3>结果摘要</h3>
-    <pre id="summaryBox">暂无结果</pre>
-
-    <h3>结果表格</h3>
-    <div id="tableBox"></div>
-
-    <h3>完整响应</h3>
-    <pre id="rawBox">等待查询...</pre>
-
-    <dialog id="settingsDialog">
-      <form method="dialog">
-        <h2>模型设置</h2>
-        <p>
-          <label for="provider">Provider:</label><br />
-          <input id="provider" />
-        </p>
-        <p>
-          <label for="model">Model:</label><br />
-          <input id="model" />
-        </p>
-        <p>
-          <label for="baseUrl">Base URL:</label><br />
-          <input id="baseUrl" />
-        </p>
-        <p>
-          <label for="apiKey">API Key:</label><br />
-          <input id="apiKey" />
-        </p>
-        <p>
-          <label for="defaultChartMode">默认 chart_mode:</label><br />
-          <select id="defaultChartMode">
+        <div class="row" style="margin-bottom:8px;">
+          <label for="chartMode">chart_mode</label>
+          <select id="chartMode">
             <option value="data">data</option>
             <option value="mermaid">mermaid</option>
             <option value="mcp">mcp</option>
           </select>
-        </p>
-        <p>
-          <label for="mcpServerUrl">MCP Server URL:</label><br />
-          <input id="mcpServerUrl" />
-        </p>
-        <p>
-          <button id="saveSettingsBtn" type="button">保存设置</button>
-          <button id="reloadSettingsBtn" type="button">重新加载</button>
-          <button id="closeSettingsBtn" value="cancel">关闭</button>
-        </p>
-      </form>
+        </div>
+
+        <div style="margin-bottom:8px;">
+          <label for="fileInput">上传文件（可选，上传后自动创建或复用 session）</label><br />
+          <input id="fileInput" type="file" multiple />
+        </div>
+
+        <div style="margin-bottom:8px;">
+          <label for="questionInput">问题</label>
+          <textarea id="questionInput" rows="5" placeholder="例如：帮我做上网行为分析"></textarea>
+        </div>
+
+        <div class="row">
+          <button id="sendBtn" type="button">发送</button>
+          <button id="refreshStatusBtn" type="button">状态</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2 class="section-title">结果摘要</h2>
+        <pre id="summaryBox">暂无结果</pre>
+      </div>
+
+      <div class="panel">
+        <h2 class="section-title">图表渲染</h2>
+        <div id="chartBox" class="muted">暂无图表</div>
+      </div>
+
+      <div class="panel">
+        <h2 class="section-title">结果表格</h2>
+        <div id="tableBox"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="section-title">完整 JSON（高亮）</h2>
+        <pre id="rawBox" class="json">等待查询...</pre>
+      </div>
+    </div>
+
+    <dialog id="settingsDialog">
+      <h2>模型设置</h2>
+      <p>
+        <label for="provider">Provider</label><br />
+        <input id="provider" />
+      </p>
+      <p>
+        <label for="model">Model</label><br />
+        <input id="model" />
+      </p>
+      <p>
+        <label for="baseUrl">Base URL</label><br />
+        <input id="baseUrl" />
+      </p>
+      <p>
+        <label for="apiKey">API Key</label><br />
+        <input id="apiKey" />
+      </p>
+      <p>
+        <label for="defaultChartMode">默认 chart_mode</label><br />
+        <select id="defaultChartMode">
+          <option value="data">data</option>
+          <option value="mermaid">mermaid</option>
+          <option value="mcp">mcp</option>
+        </select>
+      </p>
+      <p>
+        <label for="mcpServerUrl">MCP Server URL</label><br />
+        <input id="mcpServerUrl" />
+      </p>
+      <p class="row">
+        <button id="saveSettingsBtn" type="button">保存</button>
+        <button id="reloadSettingsBtn" type="button">重载</button>
+        <button id="closeSettingsBtn" type="button">关闭</button>
+      </p>
     </dialog>
 
-    <script>
-      const state = {
-        sessions: [],
-        currentSessionId: "",
-      };
+    <dialog id="sessionDialog">
+      <h2>Session 详情</h2>
+      <pre id="sessionInfo">未选择 Session</pre>
+      <p><button id="closeSessionBtn" type="button">关闭</button></p>
+    </dialog>
 
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script>
+      const state = { sessions: [], currentSessionId: "" };
       const el = (id) => document.getElementById(id);
+
+      if (window.mermaid) {
+        window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+      }
 
       function setStatus(text) {
         el("statusText").textContent = text;
-      }
-
-      async function api(path, options = {}) {
-        const res = await fetch(path, {
-          headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-          ...options,
-        });
-        const contentType = res.headers.get("content-type") || "";
-        const body = contentType.includes("application/json") ? await res.json() : await res.text();
-        if (!res.ok) {
-          throw new Error(typeof body === "string" ? body : JSON.stringify(body));
-        }
-        return body;
       }
 
       function escapeHtml(input) {
@@ -149,9 +235,37 @@
           .replaceAll(">", "&gt;");
       }
 
+      function highlightJson(data) {
+        const json = JSON.stringify(data, null, 2)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+        return json.replace(
+          /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g,
+          (match) => {
+            let cls = "number";
+            if (match.startsWith('"')) cls = match.endsWith(":") ? "key" : "string";
+            else if (match === "true" || match === "false") cls = "boolean";
+            else if (match === "null") cls = "null";
+            return `<span class="${cls}">${match}</span>`;
+          }
+        );
+      }
+
+      async function api(path, options = {}) {
+        const res = await fetch(path, {
+          headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+          ...options,
+        });
+        const contentType = res.headers.get("content-type") || "";
+        const body = contentType.includes("application/json") ? await res.json() : await res.text();
+        if (!res.ok) throw new Error(typeof body === "string" ? body : JSON.stringify(body));
+        return body;
+      }
+
       async function loadGlobalStatus() {
         const status = await api("/api/status");
-        el("globalStatus").textContent = JSON.stringify(status, null, 2);
+        setStatus(`sessions=${status.session_count} ready=${status.ready_session_count} files=${status.uploaded_file_count} tables=${status.imported_table_count}`);
       }
 
       async function loadSettings() {
@@ -182,7 +296,6 @@
         const resp = await api("/api/sessions");
         state.sessions = resp.sessions || [];
         const selected = state.currentSessionId;
-
         const select = el("sessionSelect");
         select.innerHTML = `<option value="">自动创建（上传时）</option>`;
         for (const session of state.sessions) {
@@ -194,8 +307,9 @@
         if (selected && state.sessions.some((s) => s.session_id === selected)) {
           select.value = selected;
         } else {
-          select.value = "";
           state.currentSessionId = "";
+          select.value = "";
+          el("sessionInfo").textContent = "未选择 Session";
         }
       }
 
@@ -211,60 +325,95 @@
 
       function renderTable(columns, rows) {
         if (!Array.isArray(columns) || columns.length === 0) {
-          el("tableBox").innerHTML = "";
+          el("tableBox").innerHTML = "<span class='muted'>无表格数据</span>";
           return;
         }
         const header = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
         const body = (rows || [])
           .map((row) => `<tr>${columns.map((c) => `<td>${escapeHtml(row[c] ?? "")}</td>`).join("")}</tr>`)
           .join("");
-        el("tableBox").innerHTML = `<table border="1" cellspacing="0" cellpadding="6"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
+        el("tableBox").innerHTML = `<table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
       }
 
-      function renderAnswer(answer) {
+      function extractMCPUrl(chart) {
+        if (!chart) return "";
+        if (typeof chart.url === "string" && chart.url) return chart.url;
+        if (chart.result && typeof chart.result.url === "string" && chart.result.url) return chart.result.url;
+        if (chart.result && typeof chart.result.image_url === "string" && chart.result.image_url) return chart.result.image_url;
+        return "";
+      }
+
+      async function renderChart(answer) {
+        const box = el("chartBox");
+        const chart = answer.chart || {};
+        if (chart.mode === "mcp") {
+          const url = extractMCPUrl(chart);
+          if (url) {
+            box.innerHTML = `<p><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(url)}</a></p><img src="${escapeHtml(url)}" alt="mcp chart" />`;
+          } else {
+            box.innerHTML = `<pre>${escapeHtml(JSON.stringify(chart, null, 2))}</pre>`;
+          }
+          return;
+        }
+        if (chart.mode === "mermaid") {
+          const content = chart.content || "";
+          if (!content) {
+            box.innerHTML = "<span class='muted'>无 mermaid 内容</span>";
+            return;
+          }
+          const id = "mermaid-" + Date.now();
+          box.innerHTML = `<div id="${id}" class="mermaid">${escapeHtml(content)}</div>`;
+          if (window.mermaid) {
+            try {
+              await window.mermaid.run({ nodes: [document.getElementById(id)] });
+            } catch (err) {
+              box.innerHTML = `<pre>${escapeHtml(content)}</pre>`;
+            }
+          }
+          return;
+        }
+        if (chart.mode === "data") {
+          box.innerHTML = `<pre>${highlightJson(chart.visualization || answer.visualization || {})}</pre>`;
+          return;
+        }
+        box.innerHTML = "<span class='muted'>暂无图表</span>";
+      }
+
+      async function renderAnswer(answer) {
         el("summaryBox").textContent = `${answer.summary || ""}\nmode=${answer.chart_mode} executed=${answer.executed} row_count=${answer.row_count}`;
         renderTable(answer.columns, answer.rows);
-        el("rawBox").textContent = JSON.stringify(answer, null, 2);
+        await renderChart(answer);
+        el("rawBox").innerHTML = highlightJson(answer);
       }
 
       async function sendQuestion() {
         const question = el("questionInput").value.trim();
         const chartMode = el("chartMode").value;
         const files = el("fileInput").files;
-        if (!question && files.length === 0) {
-          throw new Error("请至少输入问题或选择文件");
-        }
+        if (!question && files.length === 0) throw new Error("请至少输入问题或选择文件");
 
         if (files.length > 0) {
           const form = new FormData();
           form.append("question", question);
           form.append("chart_mode", chartMode);
-          if (state.currentSessionId) {
-            form.append("session_id", state.currentSessionId);
-          }
-          for (const file of files) {
-            form.append("file", file);
-          }
+          if (state.currentSessionId) form.append("session_id", state.currentSessionId);
+          for (const file of files) form.append("file", file);
           const res = await fetch("/api/chat/upload", { method: "POST", body: form });
           const body = await res.json();
-          if (!res.ok) {
-            throw new Error(JSON.stringify(body));
-          }
+          if (!res.ok) throw new Error(JSON.stringify(body));
           state.currentSessionId = body.session_id || state.currentSessionId;
           await loadSessions();
           if (state.currentSessionId) {
             el("sessionSelect").value = state.currentSessionId;
             await onSessionChange();
           }
-          renderAnswer(body.answer || body);
+          await renderAnswer(body.answer || body);
           setStatus(`上传并处理完成，session=${state.currentSessionId}`);
           el("fileInput").value = "";
           return;
         }
 
-        if (!state.currentSessionId) {
-          throw new Error("没有可用 session，请先上传文件");
-        }
+        if (!state.currentSessionId) throw new Error("没有可用 session，请先上传文件");
         const body = await api("/api/chat/query", {
           method: "POST",
           body: JSON.stringify({
@@ -273,7 +422,7 @@
             chart_mode: chartMode,
           }),
         });
-        renderAnswer(body.answer || body);
+        await renderAnswer(body.answer || body);
         setStatus(`查询完成，session=${state.currentSessionId}`);
       }
 
@@ -281,61 +430,34 @@
         await loadGlobalStatus();
         await loadSettings();
         await loadSessions();
-        setStatus("已加载");
       }
 
       el("openSettingsBtn").addEventListener("click", () => el("settingsDialog").showModal());
       el("closeSettingsBtn").addEventListener("click", () => el("settingsDialog").close());
       el("saveSettingsBtn").addEventListener("click", async () => {
-        try {
-          await saveSettings();
-        } catch (err) {
-          setStatus(err.message);
-        }
+        try { await saveSettings(); } catch (err) { setStatus(err.message); }
       });
       el("reloadSettingsBtn").addEventListener("click", async () => {
-        try {
-          await loadSettings();
-          setStatus("设置已刷新");
-        } catch (err) {
-          setStatus(err.message);
-        }
-      });
-      el("refreshStatusBtn").addEventListener("click", async () => {
-        try {
-          await loadGlobalStatus();
-          setStatus("状态已刷新");
-        } catch (err) {
-          setStatus(err.message);
-        }
+        try { await loadSettings(); setStatus("设置已刷新"); } catch (err) { setStatus(err.message); }
       });
       el("refreshSessionsBtn").addEventListener("click", async () => {
-        try {
-          await loadSessions();
-          await onSessionChange();
-          setStatus("Session 已刷新");
-        } catch (err) {
-          setStatus(err.message);
-        }
+        try { await loadSessions(); await onSessionChange(); setStatus("Session 已刷新"); } catch (err) { setStatus(err.message); }
       });
       el("sessionSelect").addEventListener("change", async () => {
-        try {
-          await onSessionChange();
-          setStatus("Session 已切换");
-        } catch (err) {
-          setStatus(err.message);
-        }
+        try { await onSessionChange(); } catch (err) { setStatus(err.message); }
+      });
+      el("sessionDetailBtn").addEventListener("click", async () => {
+        try { await onSessionChange(); el("sessionDialog").showModal(); } catch (err) { setStatus(err.message); }
+      });
+      el("closeSessionBtn").addEventListener("click", () => el("sessionDialog").close());
+      el("refreshStatusBtn").addEventListener("click", async () => {
+        try { await loadGlobalStatus(); } catch (err) { setStatus(err.message); }
       });
       el("sendBtn").addEventListener("click", async () => {
-        try {
-          await sendQuestion();
-        } catch (err) {
-          setStatus(err.message);
-        }
+        try { await sendQuestion(); } catch (err) { setStatus(err.message); }
       });
 
       boot().catch((err) => setStatus(err.message));
     </script>
-    </div>
   </body>
 </html>
