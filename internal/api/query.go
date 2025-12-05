@@ -17,8 +17,9 @@ import (
 )
 
 type queryRequest struct {
-	Question  string `json:"question"`
-	ChartMode string `json:"chart_mode"`
+	Question    string         `json:"question"`
+	ChartMode   string         `json:"chart_mode"`
+	ModelConfig *modelSettings `json:"model_config,omitempty"`
 }
 
 type schemaSnapshot struct {
@@ -107,10 +108,11 @@ func (h *Handler) handleSessionQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, req queryRequest) (map[string]any, error) {
-	settings, err := h.readModelSettings()
+	globalSettings, err := h.readModelSettings()
 	if err != nil {
 		return nil, errors.New("failed to read model settings")
 	}
+	settings := mergeModelSettings(globalSettings, req.ModelConfig)
 	chartMode := normalizeChartMode(req.ChartMode)
 	if chartMode == "" {
 		chartMode = normalizeChartMode(settings.DefaultChartMode)
@@ -139,6 +141,44 @@ func (h *Handler) executeSessionQuery(sessionDir string, meta sessionMetadata, r
 	return h.executeSingleQuery(meta, settings, snapshot, req.Question, chartMode)
 }
 
+func mergeModelSettings(base modelSettings, override *modelSettings) modelSettings {
+	if override == nil {
+		return base
+	}
+	out := base
+	if v := strings.TrimSpace(override.Provider); v != "" {
+		out.Provider = v
+	}
+	if v := strings.TrimSpace(override.Model); v != "" {
+		out.Model = v
+	}
+	if v := strings.TrimSpace(override.BaseURL); v != "" {
+		out.BaseURL = v
+	}
+	if v := strings.TrimSpace(override.APIKey); v != "" {
+		out.APIKey = v
+	}
+	if v := strings.TrimSpace(override.EmbeddingProvider); v != "" {
+		out.EmbeddingProvider = v
+	}
+	if v := strings.TrimSpace(override.EmbeddingModel); v != "" {
+		out.EmbeddingModel = v
+	}
+	if v := strings.TrimSpace(override.EmbeddingBaseURL); v != "" {
+		out.EmbeddingBaseURL = v
+	}
+	if v := strings.TrimSpace(override.EmbeddingAPIKey); v != "" {
+		out.EmbeddingAPIKey = v
+	}
+	if v := normalizeChartMode(override.DefaultChartMode); v != "" {
+		out.DefaultChartMode = v
+	}
+	if v := strings.TrimSpace(override.MCPServerURL); v != "" {
+		out.MCPServerURL = v
+	}
+	return out
+}
+
 func (h *Handler) executeSingleQuery(meta sessionMetadata, settings modelSettings, snapshot schemaSnapshot, question, chartMode string) (map[string]any, error) {
 	plan, plannerWarnings := h.buildQueryPlanWithFallback(settings, meta.DatabasePath, snapshot, question)
 	return h.executePlannedQuery(meta, settings, snapshot, question, chartMode, plan, plannerWarnings)
@@ -159,10 +199,10 @@ func (h *Handler) executePlannedQuery(meta sessionMetadata, settings modelSettin
 	for attempt := 1; attempt <= maxQueryRepairAttempts; attempt++ {
 		execResult = executePlanQuery(meta.DatabasePath, plan)
 		attemptTrace := map[string]any{
-			"attempt":  attempt,
-			"mode":     plan.Mode,
-			"sql":      plan.SQL,
-			"ok":       execResult.OK,
+			"attempt":   attempt,
+			"mode":      plan.Mode,
+			"sql":       plan.SQL,
+			"ok":        execResult.OK,
 			"row_count": effectiveRowCount(execResult, len(execResult.Rows)),
 		}
 		if execResult.Error != "" {
@@ -1412,15 +1452,15 @@ func buildAnalysisOverviewResponse(sessionID, question, chartMode string, report
 		"rows": []map[string]any{
 			{"analysis_view_count": len(report)},
 		},
-		"columns":       []string{"analysis_view_count"},
-		"row_count":     len(report),
-		"executed":      true,
-		"chart_mode":    chartMode,
-		"summary":       summary,
-		"query_plan":    primaryPlan,
-		"visualization": map[string]any{"type": "report", "title": question},
-		"chart":         map[string]any{"mode": chartMode, "type": "report"},
-		"warnings":      []string{},
+		"columns":         []string{"analysis_view_count"},
+		"row_count":       len(report),
+		"executed":        true,
+		"chart_mode":      chartMode,
+		"summary":         summary,
+		"query_plan":      primaryPlan,
+		"visualization":   map[string]any{"type": "report", "title": question},
+		"chart":           map[string]any{"mode": chartMode, "type": "report"},
+		"warnings":        []string{},
 		"analysis_report": report,
 	}
 }

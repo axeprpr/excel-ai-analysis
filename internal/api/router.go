@@ -24,6 +24,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/chat/upload":
 		h.handleChatUpload(w, r)
 		return
+	case r.URL.Path == "/api/chat/upload-url":
+		h.handleChatUploadURL(w, r)
+		return
 	case r.URL.Path == "/api/chat/query":
 		h.handleChatQuery(w, r)
 		return
