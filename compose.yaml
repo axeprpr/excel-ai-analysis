@@ -21,8 +21,6 @@ services:
     depends_on:
       chart-mcp:
         condition: service_started
-      frontend:
-        condition: service_started
 
   chart-mcp:
     build:
@@ -31,13 +29,3 @@ services:
     image: excel-ai-analysis-chart-mcp:local
     ports:
       - "1122:1122"
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: excel-ai-analysis-frontend:local
-    environment:
-      VITE_API_PROXY_TARGET: http://excel-ai-analysis:8080
-    ports:
-      - "4173:4173"
