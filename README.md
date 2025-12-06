@@ -152,6 +152,5 @@ Starts:
 
 ## Notes
 
-- `GET /console` is intentionally removed (`410 Gone`).
 - Use workflow tools (Dify/code nodes/etc.) against backend APIs directly.
 - `repair_trace` in query response is a structured execution/debug trace, not raw chain-of-thought.

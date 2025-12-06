@@ -78,13 +78,6 @@ func TestRootAndHealthRoutes(t *testing.T) {
 		t.Fatalf("unexpected ready version: %v", readyResp["version"])
 	}
 
-	consoleReq := httptest.NewRequest(http.MethodGet, "/console", nil)
-	consoleRec := httptest.NewRecorder()
-	server.Handler.ServeHTTP(consoleRec, consoleReq)
-	if consoleRec.Code != http.StatusGone {
-		t.Fatalf("expected status %d, got %d", http.StatusGone, consoleRec.Code)
-	}
-
 	openAPIReq := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
 	openAPIRec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(openAPIRec, openAPIReq)

@@ -103,9 +103,6 @@ func newServer(addr, dataDir, version string) *http.Server {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.OpenAPISpec())
 	})
-	mux.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "frontend console has been removed; use OpenAI-compatible /v1/chat/completions", http.StatusGone)
-	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

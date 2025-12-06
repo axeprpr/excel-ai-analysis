@@ -4,7 +4,6 @@
 
 - Backend-only service.
 - No bundled frontend.
-- `GET /console` must return `410 Gone`.
 - Primary integration targets are workflow engines and API clients.
 
 ## Required Endpoints
