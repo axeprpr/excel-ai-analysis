@@ -122,6 +122,81 @@ Supported fields:
 - `default_chart_mode`
 - `mcp_server_url`
 
+## Workflow Code Node Example
+
+The service is designed for workflow engines (such as Dify code nodes).  
+Use one code node to call `/api/chat/upload-url`, and let the backend auto-create session when `session_id` is empty.
+
+Example Python code node:
+
+```python
+import os
+import requests
+
+# Inputs from workflow
+question = inputs.get("question", "")
+file_urls = inputs.get("file_urls", [])  # list[str], e.g. S3 pre-signed URLs
+session_id = inputs.get("session_id", "")  # optional; empty means auto-create
+chart_mode = inputs.get("chart_mode", "auto")
+
+api_base = os.getenv("EXCEL_AI_API_BASE", "http://excel-ai-analysis:8080")
+
+# Model config comes from workflow secrets / env vars.
+# Do not hardcode key/model/base_url in code.
+model_config = {
+    "provider": os.getenv("LLM_PROVIDER", "openai-compatible"),
+    "model": os.getenv("LLM_MODEL", ""),
+    "base_url": os.getenv("LLM_BASE_URL", ""),
+    "api_key": os.getenv("LLM_API_KEY", ""),
+    "embedding_provider": os.getenv("EMBED_PROVIDER", "openai-compatible"),
+    "embedding_model": os.getenv("EMBED_MODEL", ""),
+    "embedding_base_url": os.getenv("EMBED_BASE_URL", ""),
+    "embedding_api_key": os.getenv("EMBED_API_KEY", ""),
+}
+
+payload = {
+    "session_id": session_id,
+    "file_urls": file_urls,
+    "question": question,
+    "chart_mode": chart_mode,
+    "model_config": model_config,
+}
+
+resp = requests.post(
+    f"{api_base}/api/chat/upload-url",
+    json=payload,
+    timeout=180,
+)
+resp.raise_for_status()
+data = resp.json()
+
+# Return to workflow
+result = {
+    "session_id": data.get("session_id", ""),
+    "summary": data.get("summary", ""),
+    "sql": data.get("sql", ""),
+    "rows": data.get("rows", []),
+    "chart": data.get("chart", {}),
+    "repair_trace": data.get("repair_trace", []),
+}
+```
+
+Recommended workflow fields:
+
+- `question` (string)
+- `file_urls` (array of object URLs)
+- `session_id` (string, optional)
+- `chart_mode` (`auto`/`data`/`mermaid`/`mcp`)
+
+Secret fields (in workflow secret manager):
+
+- `LLM_BASE_URL`
+- `LLM_MODEL`
+- `LLM_API_KEY`
+- `EMBED_BASE_URL`
+- `EMBED_MODEL`
+- `EMBED_API_KEY`
+
 ## Deployment
 
 ### Run locally
