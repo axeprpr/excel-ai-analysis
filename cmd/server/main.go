@@ -76,7 +76,6 @@ func newServer(addr, dataDir, version string) *http.Server {
 				"GET /openapi.json",
 				"GET /healthz",
 				"GET /readyz",
-				"POST /v1/chat/completions",
 				"GET /api/settings/model",
 				"PUT /api/settings/model",
 				"POST /api/chat/upload",

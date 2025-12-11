@@ -15,9 +15,6 @@ func NewHandler(dataDir string) http.Handler {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
-	case r.URL.Path == "/v1/chat/completions":
-		h.handleOpenAIChatCompletions(w, r)
-		return
 	case r.URL.Path == "/api/settings/model":
 		h.handleModelSettings(w, r)
 		return

@@ -11,7 +11,6 @@
 - `POST /api/chat/upload`
 - `POST /api/chat/upload-url`
 - `POST /api/chat/query`
-- `POST /v1/chat/completions`
 - `GET /healthz`
 - `GET /readyz`
 
@@ -56,4 +55,3 @@
 
 - `.xls` remains placeholder-only.
 - `.xlsx` supports structured sheets; complex workbook layouts are not fully handled.
-- `v1/chat/completions` compatibility is pragmatic, not full parity with every OpenAI feature.

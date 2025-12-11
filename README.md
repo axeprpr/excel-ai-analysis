@@ -20,8 +20,6 @@ Core flow:
   - `detail`, `aggregate`, `topn`, `trend`, `count`, `share`, `compare`
 - Chart output modes:
   - `data`, `mermaid`, `mcp`
-- OpenAI-compatible endpoint:
-  - `POST /v1/chat/completions`
 - Workflow endpoints:
   - `POST /api/chat/upload`
   - `POST /api/chat/upload-url`
@@ -94,16 +92,6 @@ Behavior:
   }
 }
 ```
-
-### 4) OpenAI-compatible chat
-
-`POST /v1/chat/completions`
-
-Behavior:
-
-- Analysis-style messages are routed to session-aware query pipeline.
-- Normal chat is proxied to configured OpenAI-compatible upstream model.
-- For analysis, send `session_id` in request body.
 
 ## Request-Level Model Override
 
