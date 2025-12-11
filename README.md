@@ -1,60 +1,60 @@
 # Excel AI Analysis
 
-`excel-ai-analysis` is a backend-only service for session-scoped spreadsheet analytics.
+`excel-ai-analysis` 是一个纯后端服务，用于按 `session` 隔离的表格数据分析。
 
-Core flow:
+核心流程：
 
-1. Import spreadsheet data into a session-local SQLite database.
-2. Ask natural-language questions.
-3. Return summary, SQL, rows, chart metadata, and structured repair trace.
+1. 将表格数据导入到 session 专属 SQLite 数据库。
+2. 使用自然语言提问。
+3. 返回摘要、SQL、结果行、图表元数据与结构化 `repair_trace`。
 
-## Current Scope
+## 当前范围
 
-- Backend only. Frontend has been removed.
-- One SQLite database per session.
-- Import support:
-  - `.csv` (best support)
-  - `.xlsx` (structured-sheet support)
-  - `.xls` (placeholder support with warnings)
-- Query modes:
-  - `detail`, `aggregate`, `topn`, `trend`, `count`, `share`, `compare`
-- Chart output modes:
-  - `data`, `mermaid`, `mcp`
-- Workflow endpoints:
+- 仅后端服务，已移除前端。
+- 每个 session 一个独立 SQLite 数据库。
+- 导入支持：
+  - `.csv`（支持最好）
+  - `.xlsx`（支持结构化 sheet）
+  - `.xls`（占位支持，返回告警）
+- 查询模式：
+  - `detail`、`aggregate`、`topn`、`trend`、`count`、`share`、`compare`
+- 图表输出模式：
+  - `data`、`mermaid`、`mcp`
+- 工作流接口：
   - `POST /api/chat/upload`
   - `POST /api/chat/upload-url`
   - `POST /api/chat/query`
 
-## Why This Design
+## 设计原因
 
-- Session isolation avoids cross-dataset leakage.
-- Backend keeps deterministic SQL safety checks.
-- Optional LLM planning can improve SQL generation.
-- Multi-pass repair and `repair_trace` improve debuggability in workflow orchestration.
+- session 隔离，避免跨数据集污染。
+- 后端执行确定性的 SQL 安全检查。
+- 可选 LLM 规划提升 SQL 生成质量。
+- 多轮修复与 `repair_trace` 提升流程编排可观测性。
 
-## API Summary
+## API 概览
 
-### 1) Upload local files
+### 1) 上传本地文件
 
-`POST /api/chat/upload` (multipart/form-data)
+`POST /api/chat/upload`（`multipart/form-data`）
 
-Fields:
+字段：
 
-- `session_id` (optional)
-- `question` (optional)
-- `chart_mode` (optional)
-- `model_config` (optional JSON string)
-- `file` (one or many)
+- `session_id`（可选）
+- `question`（可选）
+- `chart_mode`（可选）
+- `model_config`（可选，JSON 字符串）
+- `file`（可传一个或多个）
 
-Behavior:
+行为：
 
-- Creates session when `session_id` is omitted.
-- Imports files immediately.
-- If `question` is provided, returns answer in the same response.
+- 未传 `session_id` 时自动创建 session。
+- 立即执行导入。
+- 若传入 `question`，同一次请求直接返回问答结果。
 
-### 2) Upload by URL (S3/HTTP)
+### 2) 按 URL 上传（S3/HTTP）
 
-`POST /api/chat/upload-url` (application/json)
+`POST /api/chat/upload-url`（`application/json`）
 
 ```json
 {
@@ -75,9 +75,9 @@ Behavior:
 }
 ```
 
-### 3) Query existing session
+### 3) 查询已有 session
 
-`POST /api/chat/query` (application/json)
+`POST /api/chat/query`（`application/json`）
 
 ```json
 {
@@ -93,11 +93,11 @@ Behavior:
 }
 ```
 
-## Request-Level Model Override
+## 请求级模型覆盖
 
-`model_config` is request-scoped. It overrides persisted model settings for the current request only.
+`model_config` 是请求级配置，仅覆盖当前请求，不会改写持久化全局配置。
 
-Supported fields:
+支持字段：
 
 - `provider`
 - `model`
@@ -110,27 +110,26 @@ Supported fields:
 - `default_chart_mode`
 - `mcp_server_url`
 
-## Workflow Code Node Example
+## 工作流代码节点示例
 
-The service is designed for workflow engines (such as Dify code nodes).  
-Use one code node to call `/api/chat/upload-url`, and let the backend auto-create session when `session_id` is empty.
+该服务面向流程编排系统（如 Dify Code 节点）。  
+推荐使用一个代码节点调用 `/api/chat/upload-url`，当 `session_id` 为空时由后端自动创建。
 
-Example Python code node:
+Python 示例：
 
 ```python
 import os
 import requests
 
-# Inputs from workflow
+# 工作流输入
 question = inputs.get("question", "")
-file_urls = inputs.get("file_urls", [])  # list[str], e.g. S3 pre-signed URLs
-session_id = inputs.get("session_id", "")  # optional; empty means auto-create
+file_urls = inputs.get("file_urls", [])  # list[str]，例如 S3 临时 URL
+session_id = inputs.get("session_id", "")  # 可选；空值表示自动创建
 chart_mode = inputs.get("chart_mode", "auto")
 
 api_base = os.getenv("EXCEL_AI_API_BASE", "http://excel-ai-analysis:8080")
 
-# Model config comes from workflow secrets / env vars.
-# Do not hardcode key/model/base_url in code.
+# 模型配置通过环境变量 / 密钥管理注入，不要硬编码
 model_config = {
     "provider": os.getenv("LLM_PROVIDER", "openai-compatible"),
     "model": os.getenv("LLM_MODEL", ""),
@@ -158,7 +157,7 @@ resp = requests.post(
 resp.raise_for_status()
 data = resp.json()
 
-# Return to workflow
+# 返回给后续节点
 result = {
     "session_id": data.get("session_id", ""),
     "summary": data.get("summary", ""),
@@ -169,14 +168,14 @@ result = {
 }
 ```
 
-Recommended workflow fields:
+推荐的工作流字段：
 
-- `question` (string)
-- `file_urls` (array of object URLs)
-- `session_id` (string, optional)
-- `chart_mode` (`auto`/`data`/`mermaid`/`mcp`)
+- `question`（字符串）
+- `file_urls`（对象存储 URL 数组）
+- `session_id`（字符串，可选）
+- `chart_mode`（`auto`/`data`/`mermaid`/`mcp`）
 
-Secret fields (in workflow secret manager):
+推荐放入密钥管理的字段：
 
 - `LLM_BASE_URL`
 - `LLM_MODEL`
@@ -185,35 +184,35 @@ Secret fields (in workflow secret manager):
 - `EMBED_MODEL`
 - `EMBED_API_KEY`
 
-## Deployment
+## 部署
 
-### Run locally
+### 本地运行
 
 ```bash
 make run
 ```
 
-Default:
+默认地址：
 
 - API: `http://127.0.0.1:8080`
 
-### Run with Docker Compose
+### Docker Compose 运行
 
 ```bash
 make up
 ```
 
-Starts:
+默认启动：
 
-- backend (`excel-ai-analysis`)
-- chart sidecar (`chart-mcp`)
+- 后端服务（`excel-ai-analysis`）
+- 图表侧车（`chart-mcp`）
 
-### Health checks
+### 健康检查
 
 - `GET /healthz`
 - `GET /readyz`
 
-## Notes
+## 说明
 
-- Use workflow tools (Dify/code nodes/etc.) against backend APIs directly.
-- `repair_trace` in query response is a structured execution/debug trace, not raw chain-of-thought.
+- 推荐通过工作流工具（Dify / 代码节点 / 自定义编排）直接调用后端 API。
+- `repair_trace` 是结构化执行/修复轨迹，不是原始思维链。
