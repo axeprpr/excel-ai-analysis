@@ -1,0 +1,8 @@
+name: excel-ai-analysis-agent
+description: Excel / CSV 表格分析智能体
+model: qwen3.5-27b
+memory_enabled: false
+memory_injection: false
+tool_groups: []
+skills:
+  - excel-ai-analysis-mcp

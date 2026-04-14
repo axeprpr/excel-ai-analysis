@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "excelai": {
+      "url": "http://host.docker.internal:32120/mcp"
+    }
+  },
+  "skills": {
+    "excel-ai-analysis-mcp": true
+  }
+}

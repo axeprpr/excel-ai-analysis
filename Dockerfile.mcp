@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    EXCEL_AI_API_BASE=http://excel-ai-analysis:8080
+
+WORKDIR /app
+
+COPY mcp/requirements.txt /app/mcp/requirements.txt
+RUN python -m pip install --no-cache-dir -r /app/mcp/requirements.txt
+
+COPY mcp /app/mcp
+
+EXPOSE 8000
+
+CMD ["python3", "/app/mcp/server.py", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000", "--mount-path", "/mcp"]

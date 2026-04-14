@@ -7,3 +7,5 @@ dist/
 *.out
 *.test
 coverage.txt
+__pycache__/
+*.pyc

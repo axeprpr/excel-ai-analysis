@@ -1,0 +1,28 @@
+FROM node:20-bookworm
+
+WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    pkg-config \
+    python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN npm init -y \
+  && npm install --omit=dev express ignore-styles @antv/gpt-vis-ssr
+
+COPY chart-ssr/server.mjs /app/server.mjs
+
+ENV PORT=3001
+ENV OUTPUT_DIR=/app/public/images
+ENV PUBLIC_BASE_URL=http://127.0.0.1:3001
+
+EXPOSE 3001
+
+CMD ["node", "/app/server.mjs"]

@@ -2,12 +2,15 @@ FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
 
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
 COPY go.mod go.sum ./
 COPY vendor ./vendor
 COPY cmd ./cmd
 COPY internal ./internal
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=vendor -o /out/excel-ai-analysis ./cmd/server
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=vendor -o /out/excel-ai-analysis ./cmd/server
 
 FROM debian:bookworm-slim
 

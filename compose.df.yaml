@@ -1,0 +1,62 @@
+services:
+  excel-ai-analysis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: excel-ai-analysis:df
+    environment:
+      ADDR: ":8080"
+      DATA_DIR: /app/data
+      APP_VERSION: df-local
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "32118:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  chart-mcp:
+    depends_on:
+      chart-ssr:
+        condition: service_started
+    build:
+      context: .
+      dockerfile: Dockerfile.chart-mcp
+    image: excel-ai-analysis-chart-mcp:df
+    environment:
+      VIS_REQUEST_SERVER: http://chart-ssr:3001/render
+    ports:
+      - "32119:1122"
+
+  chart-ssr:
+    build:
+      context: .
+      dockerfile: Dockerfile.chart-ssr
+    image: excel-ai-analysis-chart-ssr:df
+    environment:
+      PORT: "3001"
+      OUTPUT_DIR: /app/public/images
+      CHART_SSR_PUBLIC_BASE_URL: http://192.168.23.34:32117
+      PUBLIC_BASE_URL: ${CHART_SSR_PUBLIC_BASE_URL:-http://192.168.23.34:32117}
+    ports:
+      - "32117:3001"
+
+  excel-ai-analysis-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    image: excel-ai-analysis-mcp:df
+    environment:
+      EXCEL_AI_API_BASE: http://excel-ai-analysis:8080
+      DEERFLOW_THREADS_DIRS: /deerflow-threads
+    volumes:
+      - ${DEERFLOW_THREADS_HOST_PATH:-/root/work/deer-flow/backend/.deer-flow/threads}:/deerflow-threads:ro
+    depends_on:
+      excel-ai-analysis:
+        condition: service_healthy
+    ports:
+      - "32120:8000"
